@@ -56,6 +56,8 @@ class Config:
     r0: float = 4.0                     # px added to the half widths for an event's reach
     link_k: float = 1.0                 # events link within r0 + link_k x the mean of their thinner widths
     share_k: float = 1.0                # events on a common trace link within r0 + share_k x the crossing widths
+    merge_k: float = 0.0                # junction discs closer than merge_k (R_a + R_b) are one region
+    pass_k: float = 0.0                 # traces passing within pass_k R of a junction add their arms
     arm_min: float = 6.0                # px, shortest arm counted
     cross_turn_deg: float = 40.0        # a crossing's through pairs turn at most this much
     od_width: bool = True               # vessel widths from OD cross-sections (else 2.5 x the filter scale)
@@ -952,12 +954,44 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
                 t["w_od"], t["a_od"] = od_widths(OD, t["xy"], t["w"])
             t["w"] = np.clip(t["w_od"], 1.5, None)
     ev = _events(traces, cfg)
-    junctions = []
-    for g in _cluster_events(ev, cfg):
+    groups = _cluster_events(ev, cfg)
+    cand = []
+    for g in groups:
         E = [ev[k] for k in g]
         c = np.mean([e["p"] for e in E], 0)
         R = max(math.hypot(*(e["p"] - c)) + cfg.r0 + 0.5 * e["wide"] for e in E)
-        tids = sorted({i for e in E for i in e["tr"]})
+        cand.append([c, R, set(g)])
+    if cfg.merge_k > 0:                               # junctions whose discs overlap are one region
+        changed = True
+        while changed:
+            changed = False
+            for a in range(len(cand)):
+                for b in range(a + 1, len(cand)):
+                    ca, Ra, ga = cand[a]
+                    cb, Rb, gb = cand[b]
+                    if math.hypot(*(ca - cb)) <= cfg.merge_k * (Ra + Rb):
+                        g = ga | gb
+                        E = [ev[k] for k in sorted(g)]
+                        c = np.mean([e["p"] for e in E], 0)
+                        R = max(math.hypot(*(e["p"] - c)) + cfg.r0 + 0.5 * e["wide"] for e in E)
+                        cand[a] = [c, R, g]
+                        del cand[b]
+                        changed = True
+                        break
+                if changed:
+                    break
+    if cfg.pass_k > 0:
+        from scipy.spatial import cKDTree
+        allp = np.concatenate([t["xy"] for t in traces])
+        own = np.concatenate([np.full(len(t["xy"]), i) for i, t in enumerate(traces)])
+        tree = cKDTree(allp)
+    junctions = []
+    for c, R, g in cand:
+        E = [ev[k] for k in sorted(g)]
+        tids = {i for e in E for i in e["tr"]}
+        if cfg.pass_k > 0:                            # every trace through the region adds its arms
+            tids |= {int(own[q]) for q in tree.query_ball_point(c, cfg.pass_k * R)}
+        tids = sorted(tids)
         arms = _arms(traces, tids, c, R, cfg)
         if len(arms) < 3:
             continue
