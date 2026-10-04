@@ -10,3 +10,6 @@ venv/
 vesselscene/_scratch/
 _scratch/
 out/
+# vesselnet: generated training scenes and training runs
+/data/
+/runs/
