@@ -16,8 +16,8 @@ alone"), built as a competent practitioner would, with its few thresholds tuned 
    skeletonised, components shorter than ``MIN_COMPONENT_PX`` dropped.  Gap closing: the anisotropy term
    cancels the response where two vessels meet (both eigenvalues large), so lines stop a few px short of
    every junction.  Each line end is joined straight to the nearest skeleton pixel ahead of it (within
-   ``BRIDGE_PX`` and a cone of ``BRIDGE_DEG``), then the result is thinned again.  Without this step dev
-   junction recall is about 0.03; with it about 0.6.
+   ``BRIDGE_PX`` and a cone of ``BRIDGE_DEG``), then the result is thinned again.  On the dev scenes this
+   step raises junction recall from 0.10 to 0.64 (F1 0.16 -> 0.56).
 4. **Skeleton graph.**  Pixels are linked 8-connected, a diagonal link being dropped where a 4-connected
    path of skeleton pixels joins the same two pixels (otherwise every staircase step reads as a branch).
    Pixels with >= 3 links are junction pixels, clustered 8-connected into nodes; pixels with one link are

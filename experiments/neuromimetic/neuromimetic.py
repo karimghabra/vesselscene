@@ -48,6 +48,10 @@ class Config:
     t_high: float = 3.5
     t_low: float = 1.7
     min_len: float = 10.0               # px, shortest trace kept
+    border_px: int = 3                  # no line candidates this close to the frame or to invalid pixels
+    tracker: bool = True                # tangent tracker (else skeletons of SE(2) components)
+    look_px: int = 3                    # the tracker looks this far ahead (bridging 1-2 px gaps)
+    pass_px: int = 4                    # ... and passes through another trace's claim for at most this long
     spur_len: float = 5.0               # px, terminal skeleton branches shorter than this (+ width) are cut
     # 7. graph assembly
     gap_att: float = 6.0                # px beyond the other vessel's half width an end may attach
@@ -185,6 +189,9 @@ def photoreceptors(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT) 
         B = _masked_mean(L, bg, cfg.bg_sigma)
         OD = B - L
     OD = np.where(ok, OD, 0.0).astype(np.float32)
+    if not ok.all():                                  # filters see the nearest valid OD, not a step to 0
+        iy, ix = ndi.distance_transform_edt(~ok, return_distances=False, return_indices=True)
+        OD = OD[iy, ix]
     return dict(OD=OD, B=B, L=L, ok=ok, bg=bg, mask=mask)
 
 
@@ -510,17 +517,125 @@ def _plen(P: np.ndarray) -> float:
     return float(np.hypot(*np.diff(P, axis=0).T).sum()) if len(P) > 1 else 0.0
 
 
-def readout(C: np.ndarray, S: np.ndarray, cfg: Config = DEFAULT, t_high=None, t_low=None, chan: int = 0) -> list:
-    """Stage 6, readout: non-maximum suppression across space and orientation, hysteresis in SE(2), tracing.
+def readout(C: np.ndarray, S: np.ndarray, cfg: Config = DEFAULT, t_high=None, t_low=None, chan: int = 0,
+            valid: np.ndarray | None = None) -> list:
+    """Stage 6, readout: non-maximum suppression across space and orientation, hysteresis in SE(2) by
+    tracing along the tangent.
 
     Maths: a sample (theta_k, y, x) is a candidate where C_k is a maximum along the normal n_k (bilinear
-    neighbours at +-1 px) and over orientation (C_k >= C_k-1, C_k > C_k+1: several orientations may peak at
-    one pixel, two crossing lines live in different layers) and C_k > t_low. Candidates are linked in SE(2)
-    (26-neighbours in (theta, y, x), theta circular), and a component is kept when it reaches t_high: a line
-    is traced in its own orientation layers, so it passes straight through a crossing instead of merging
-    with the other line. Each component's (x, y) footprint is thinned to a 1-px skeleton, short terminal
-    spurs (< spur_len + its width) are cut, and the node-to-node paths are smoothed and resampled at 1 px.
-    Returns traces: dicts with xy (n, 2), c (strength), w (width estimate 2.5 sigma of the selected scale)."""
+    neighbours at +-1 px), a maximum over orientation (C_k >= C_k-1, C_k > C_k+1: several orientations may
+    peak at one pixel, two crossing lines live in different layers) and C_k > t_low, at least border_px from
+    the frame and from invalid pixels. Seeds are the candidates above t_high, strongest first (ties by
+    position). From a seed a trace steps 1 px along its tangent in both directions; the next sample is the
+    best candidate (C, less 15 % per px of lateral offset and 10 % per layer of turn) among the positions
+    0, +-1 px across the predicted one in layers k and k+-1 (SE(2) connectivity, theta circular). So a trace
+    follows its own orientation layer straight through a crossing (the other line is >= 2 layers away) and
+    takes the straighter branch at a fork; it looks up to look_px ahead (1-2 px gaps), passes through another
+    trace's claim for at most pass_px samples (a shallow crossing) and stops where no candidate continues it
+    or where it keeps running along another trace (a T or a merge: the end is put at the first contact).
+    Each accepted sample claims its position and the lateral +-1 px in layers k, k+-1. Traces shorter than min_len are dropped; the rest are smoothed and
+    resampled at 1 px. Returns traces: dicts with xy (n, 2), c (strength), w (2.5 sigma of the selected
+    scale), chan."""
+    t_high = cfg.t_high if t_high is None else t_high
+    t_low = cfg.t_low if t_low is None else t_low
+    n, H, W = C.shape
+    th = orientations(cfg)
+    cand = np.zeros(C.shape, bool)
+    for k, t in enumerate(th):
+        nx, ny = -math.sin(t), math.cos(t)
+        a, b = _shift(C[k], nx, ny), _shift(C[k], -nx, -ny)
+        cand[k] = (C[k] >= a) & (C[k] > b) & (C[k] > t_low)
+    cand &= (C >= np.roll(C, 1, 0)) & (C > np.roll(C, -1, 0))
+    inner = np.ones((H, W), bool) if valid is None else valid.copy()
+    b = cfg.border_px
+    inner[:b], inner[-b:], inner[:, :b], inner[:, -b:] = False, False, False, False
+    if valid is not None and not valid.all():
+        inner &= ndi.binary_erosion(valid, iterations=b)
+    cand &= inner[None]
+    TX, TY = np.cos(th), np.sin(th)
+    owner = np.full(C.shape, -1, np.int32)
+    flat = np.flatnonzero(cand & (C > t_high))
+    seeds = flat[np.lexsort((flat, -C.ravel()[flat]))]
+    sig = np.asarray(cfg.scales, np.float32)
+    paths = []
+
+    def claim(k, y, x, tid):
+        nx, ny = -TY[k], TX[k]
+        for dk in (-1, 0, 1):
+            kk = (k + dk) % n
+            for o in (-1, 0, 1):
+                yy, xx = int(round(y + o * ny)), int(round(x + o * nx))
+                if 0 <= yy < H and 0 <= xx < W and owner[kk, yy, xx] < 0:
+                    owner[kk, yy, xx] = tid
+
+    def walk(k, y, x, sgn, tid):
+        out, inside = [], 0
+        dx, dy = sgn * TX[k], sgn * TY[k]
+        for _ in range(4 * (H + W)):
+            best = None
+            for step in range(1, cfg.look_px + 1):        # look ahead over gaps of up to look_px - 1 px
+                for dk in (0, -1, 1):
+                    kk = (k + dk) % n
+                    tx, ty = TX[kk], TY[kk]
+                    if tx * dx + ty * dy < 0:
+                        tx, ty = -tx, -ty
+                    nx, ny = -ty, tx
+                    for o in (0, -1, 1):
+                        qy, qx = int(round(y + step * ty + o * ny)), int(round(x + step * tx + o * nx))
+                        if (qy == y and qx == x) or not (0 <= qy < H and 0 <= qx < W) or not cand[kk, qy, qx]:
+                            continue
+                        if (qx - x) * dx + (qy - y) * dy <= 0 or owner[kk, qy, qx] == tid:
+                            continue
+                        sc = C[kk, qy, qx] * (1 - 0.15 * abs(o)) * (1 - 0.1 * abs(dk))
+                        if best is None or sc > best[0]:
+                            best = (sc, kk, qy, qx, tx, ty)
+                if best is not None:
+                    break
+            if best is None:
+                break
+            _, kk, qy, qx, tx, ty = best
+            out.append((kk, qy, qx))
+            if owner[kk, qy, qx] >= 0:                # in another trace's claim: a shallow crossing is passed,
+                inside += 1                           # running along it for pass_px is a merge (T): stop
+                if inside > cfg.pass_px:
+                    del out[len(out) - inside + 1:]
+                    break
+            else:
+                inside = 0
+                claim(kk, qy, qx, tid)
+            k, y, x, dx, dy = kk, qy, qx, tx, ty
+        return out
+
+    for sd in seeds.tolist():
+        k, rem = divmod(sd, H * W)
+        y, x = divmod(rem, W)
+        if owner[k, y, x] >= 0:
+            continue
+        tid = len(paths)
+        claim(k, y, x, tid)
+        f = walk(k, y, x, 1, tid)
+        bk = walk(k, y, x, -1, tid)
+        paths.append(bk[::-1] + [(k, y, x)] + f)
+    traces = []
+    for pth in paths:
+        if len(pth) < 3:
+            continue
+        P = np.array(pth)
+        xy = P[:, [2, 1]].astype(float)
+        if _plen(xy) < cfg.min_len:
+            continue
+        xy = _resample(_smooth(xy, 5), 1.0)
+        kk = np.interp(np.linspace(0, len(P) - 1, len(xy)), np.arange(len(P)), np.arange(len(P))).round().astype(int)
+        ks, ys, xs = P[kk, 0], P[kk, 1], P[kk, 2]
+        traces.append(dict(xy=xy, c=C[ks, ys, xs].astype(float), w=2.5 * sig[S[ks, ys, xs]].astype(float),
+                           chan=chan))
+    return traces
+
+
+def _readout_skel(C: np.ndarray, S: np.ndarray, cfg: Config = DEFAULT, t_high=None, t_low=None, chan: int = 0,
+                  valid: np.ndarray | None = None) -> list:
+    """The first readout (kept for comparison): SE(2) connected components of the candidates, each
+    component's footprint skeletonised and split into node-to-node paths."""
     from skimage.morphology import skeletonize
     t_high = cfg.t_high if t_high is None else t_high
     t_low = cfg.t_low if t_low is None else t_low
@@ -532,6 +647,12 @@ def readout(C: np.ndarray, S: np.ndarray, cfg: Config = DEFAULT, t_high=None, t_
         a, b = _shift(C[k], nx, ny), _shift(C[k], -nx, -ny)
         cand[k] = (C[k] >= a) & (C[k] > b) & (C[k] > t_low)
     cand &= (C >= np.roll(C, 1, 0)) & (C > np.roll(C, -1, 0))
+    inner = np.ones((H, W), bool) if valid is None else valid.copy()
+    b = cfg.border_px
+    inner[:b], inner[-b:], inner[:, :b], inner[:, -b:] = False, False, False, False
+    if valid is not None and not valid.all():
+        inner &= ndi.binary_erosion(valid, iterations=b)
+    cand &= inner[None]
     lab, nl = _se2_components(cand)
     if nl == 0:
         return []
@@ -1272,6 +1393,7 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
     OD, bg = s1["OD"], s1["bg"]
     hp = OD - _gblur(OD, 8.0)
     sig2 = np.maximum(_local_rms(hp, bg, 32.0), 1e-4) ** 2
+    sig2 = np.where(s1["ok"], sig2, 1e12)              # invalid pixels carry no weight
     for rnd in range(cfg.rounds + 1):
         edges, junctions, traces = end_stopping(traces, cfg, OD)
         for e in edges:
@@ -1284,7 +1406,8 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
             for ci, ch in enumerate(simple_cells(res, bg, cfg)):
                 U = surround(ch["U"], ch["sigma"], cfg) if cfg.surround else ch["U"]
                 C = association_field(U, ch["sigma"], cfg) if cfg.association else np.maximum(U, 0)
-                new += readout(C, ch["S"], cfg, chan=ci, t_high=cfg.t_high * cfg.re_k, t_low=cfg.t_low * cfg.re_k)
+                new += readout(C, ch["S"], cfg, chan=ci, t_high=cfg.t_high * cfg.re_k, t_low=cfg.t_low * cfg.re_k,
+                               valid=s1["ok"])
             traces = merge_channels(new, cfg, accepted=traces)
     edges, junctions, traces = end_stopping(traces, cfg, OD)
     for k, J in enumerate(junctions):
@@ -1321,7 +1444,8 @@ def propose(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT) -> dict
             U = surround(U, ch["sigma"], cfg)
         C = association_field(U, ch["sigma"], cfg) if cfg.association else np.maximum(U, 0)
         ch["C"] = C
-        traces += readout(C, ch["S"], cfg, chan=ci)
+        ro = readout if cfg.tracker else _readout_skel
+        traces += ro(C, ch["S"], cfg, chan=ci, valid=s1["ok"])
     return dict(s1=s1, chans=chans, traces=merge_channels(traces, cfg))
 
 
