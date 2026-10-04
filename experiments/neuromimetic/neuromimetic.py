@@ -51,6 +51,7 @@ class Config:
     spur_len: float = 5.0               # px, terminal skeleton branches shorter than this (+ width) are cut
     # 7. graph assembly
     gap_att: float = 6.0                # px beyond the other vessel's half width an end may attach
+    att_cone_deg: float = 45.0          # ... within this cone ahead of the end
     gap_join: float = 14.0              # px, collinear end-to-end gaps bridged
     join_turn_deg: float = 40.0
     r0: float = 4.0                     # px added to the half widths for an event's reach
@@ -64,6 +65,11 @@ class Config:
     # 8. iterative refinement
     verify: bool = True
     rounds: int = 2
+    repropose: bool = True
+    re_k: float = 1.0                   # thresholds of the re-proposal readout, x t_high / t_low
+    corr_px: float = 6.0                # px^2, correlation area of the OD noise (texture) for the gains
+    mdl_k: float = 20.0                 # description cost of an edge: mdl_k (1 + length / mdl_len)
+    mdl_len: float = 20.0
 
 
 DEFAULT = Config()
@@ -567,7 +573,7 @@ def _tangents(P: np.ndarray, k: int = 3) -> np.ndarray:
     return v / np.maximum(np.hypot(*v.T), 1e-9)[:, None]
 
 
-def merge_channels(traces: list, cfg: Config = DEFAULT) -> list:
+def merge_channels(traces: list, cfg: Config = DEFAULT, accepted: list | None = None) -> list:
     """Merge the traces of the spatial-frequency channels: strongest first, a point is dropped where an
     accepted trace runs parallel (< 20 deg) within 3 px, or parallel (< 10 deg) within 0.6 of its width when
     that trace is from a coarser channel (the wall echoes of a wide vein; a thin vessel crossing the vein at a
@@ -576,8 +582,14 @@ def merge_channels(traces: list, cfg: Config = DEFAULT) -> list:
     order = sorted(range(len(traces)), key=lambda i: (-float(np.mean(traces[i]["c"])),
                                                       float(traces[i]["xy"][0, 0]), float(traces[i]["xy"][0, 1])))
     cos_par, cos_wall = math.cos(math.radians(20.0)), math.cos(math.radians(10.0))
-    acc, A_xy, A_t, A_w, A_ch = [], [], [], [], []
+    acc, A_xy, A_t, A_w, A_ch = list(accepted or []), [], [], [], []
     tree = None
+    if acc:
+        A_xy = np.concatenate([a["xy"] for a in acc])
+        A_t = np.concatenate([_tangents(a["xy"]) for a in acc])
+        A_w = np.concatenate([a["w"] for a in acc])
+        A_ch = np.concatenate([np.full(len(a["xy"]), a.get("chan", 0)) for a in acc])
+        tree = cKDTree(A_xy)
     for i in order:
         t = traces[i]
         P = t["xy"]
@@ -606,7 +618,7 @@ def merge_channels(traces: list, cfg: Config = DEFAULT) -> list:
             A_xy = np.concatenate([a["xy"] for a in acc])
             A_t = np.concatenate([_tangents(a["xy"]) for a in acc])
             A_w = np.concatenate([a["w"] for a in acc])
-            A_ch = np.concatenate([np.full(len(a["xy"]), a["chan"]) for a in acc])
+            A_ch = np.concatenate([np.full(len(a["xy"]), a.get("chan", 0)) for a in acc])
             tree = cKDTree(A_xy)
     return acc
 
@@ -776,10 +788,12 @@ def _rev(t: dict) -> dict:
 def _concat(A: dict, B: dict) -> dict:
     gap = _resample(np.stack([A["xy"][-1], B["xy"][0]]), 1.0)[1:-1]
     m = len(gap)
-    out = dict(xy=np.concatenate([A["xy"], gap, B["xy"]], 0))
-    for k in ("c", "w"):
-        fill = np.full(m, 0.5 * (A[k][-1] + B[k][0]), float)
-        out[k] = np.concatenate([A[k], fill, B[k]])
+    out = dict(xy=np.concatenate([A["xy"], gap, B["xy"]], 0), chan=min(A.get("chan", 0), B.get("chan", 0)))
+    na, nb = len(A["xy"]), len(B["xy"])
+    for k, v in A.items():
+        if k != "xy" and isinstance(v, np.ndarray) and len(v) == na and k in B and len(B[k]) == nb:
+            fill = np.full(m, 0.5 * (v[-1] + B[k][0]), float)
+            out[k] = np.concatenate([v, fill, B[k]])
     return out
 
 
@@ -812,7 +826,10 @@ def _events(traces: list, cfg: Config) -> list:
                     continue
                 v = pts[q] - p
                 dist = math.hypot(*v)
-                if dist > cfg.gap_att + wall[q] / 2 or float(np.dot(v, d)) < -max(2.0, wall[q] / 2):
+                if dist > cfg.gap_att + wall[q] / 2:
+                    continue
+                inside = dist <= max(2.0, 0.5 * wall[q])          # the end already lies in its lumen
+                if not inside and float(np.dot(v, d)) < dist * math.cos(math.radians(cfg.att_cone_deg)):
                     continue
                 key = (dist - wall[q] / 2, j, m)
                 if best is None or key < best[0]:
@@ -824,7 +841,7 @@ def _events(traces: list, cfg: Config) -> list:
             pos = 0.5 * (p + pts[q]) if end_end else pts[q].copy()
             ev.append(dict(p=pos, tr=(i, j), wt={i: float(t["w"][ie]), j: float(wall[q])},
                            wide=max(t["w"][ie], wall[q]), thin=min(t["w"][ie], wall[q]), kind="T",
-                           att=(i, e, pts[q].copy()) if float(np.dot(pts[q] - p, d)) > 0 else None))
+                           att=(i, e, pts[q].copy())))
     lines = [LineString(t["xy"]) for t in traces]
     st = STRtree(lines)
     a_idx, b_idx = st.query(lines, predicate="intersects")
@@ -1008,13 +1025,12 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
         if math.hypot(*(q - p)) <= 1.0:
             continue
         seg = _resample(np.stack([p, q]), 1.0)[1:]
-        k = 0 if end == 0 else -1
-        if end == 0:
-            t["xy"] = np.concatenate([seg[::-1], t["xy"]])
-            t["c"], t["w"] = np.r_[np.full(len(seg), t["c"][0]), t["c"]], np.r_[np.full(len(seg), t["w"][0]), t["w"]]
-        else:
-            t["xy"] = np.concatenate([t["xy"], seg])
-            t["c"], t["w"] = np.r_[t["c"], np.full(len(seg), t["c"][k])], np.r_[t["w"], np.full(len(seg), t["w"][k])]
+        n = len(t["xy"])
+        for k_, v in list(t.items()):
+            if k_ != "xy" and isinstance(v, np.ndarray) and len(v) == n:
+                pad = np.full(len(seg), v[0] if end == 0 else v[-1])
+                t[k_] = np.r_[pad, v] if end == 0 else np.r_[v, pad]
+        t["xy"] = np.concatenate([seg[::-1], t["xy"]]) if end == 0 else np.concatenate([t["xy"], seg])
     edges = _split(traces, junctions, cfg)
     return edges, junctions, traces
 
@@ -1043,8 +1059,248 @@ def _split(traces, junctions, cfg):
             if ja is not None and ja == jb and L < 2 * junctions[ja]["r"]:
                 continue
             edges.append(dict(xy=xy.copy(), c=t["c"][a:b + 1].copy(), w=t["w"][a:b + 1].copy(), j=(ja, jb),
-                              trace=i, chan=t.get("chan", 0)))
+                              trace=i, rng=(a, b), chan=t.get("chan", 0)))
     return edges
+
+
+# ======================================================================== 8. iterative refinement
+_RG = np.geomspace(0.5, 30.0, 22)                 # half widths r (px) of the blurred-box profile grid
+_SG = np.geomspace(0.7, 10.0, 10)                 # blurs s (px)
+
+
+def _box(u: np.ndarray, r, s) -> np.ndarray:
+    """A lumen of half width r blurred by a Gaussian of std s, peak-normalised: (Phi((r-u)/s) - Phi((-r-u)/s))
+    / (Phi(r/s) - Phi(-r/s)) -- the closed-form cross-section of a tube in OD (chord law aside)."""
+    from scipy.special import ndtr
+    return (ndtr((r - u) / s) - ndtr((-r - u) / s)) / (ndtr(r / s) - ndtr(-r / s))
+
+
+def fit_profile(OD: np.ndarray, xy: np.ndarray, w: np.ndarray) -> tuple[float, float, float]:
+    """Width, blur and contrast of an edge from its cross-sections in the cleaned OD target: the median
+    profile along the normals (middle 80 % of the edge, every 2 px, +-(1.5 w + 6) px), fitted by
+    a box(u; r, s) + b over a grid of (r, s) with (a, b) by linear least squares. Returns (a, r, s)."""
+    n = len(xy)
+    T = _tangents(xy, 2)
+    lo, hi = (int(0.1 * n), int(np.ceil(0.9 * n))) if n > 12 else (0, n)
+    ii = np.arange(lo, max(hi, lo + 1), 2)
+    U = float(np.clip(1.5 * float(np.median(w)) + 6.0, 8.0, 60.0))
+    us = np.arange(-U, U + 0.01, 0.5)
+    X = xy[ii, None, 0] - us[None, :] * T[ii, None, 1]
+    Y = xy[ii, None, 1] + us[None, :] * T[ii, None, 0]
+    prof = np.median(_bilinear(OD, X.ravel(), Y.ravel()).reshape(X.shape), 0)
+    M = _box(us[None, None, :], _RG[:, None, None], _SG[None, :, None]).reshape(-1, len(us))
+    m1, m2 = M.sum(1), (M * M).sum(1)
+    k = float(len(us))
+    py, pp = float(prof.sum()), (M * prof[None]).sum(1)
+    det = m2 * k - m1 * m1
+    a = (pp * k - m1 * py) / np.maximum(det, 1e-9)
+    b = (py - a * m1) / k
+    ss = ((a[:, None] * M + b[:, None] - prof[None]) ** 2).sum(1)
+    ss[a <= 0] = np.inf
+    j = int(np.argmin(ss))
+    if not np.isfinite(ss[j]):
+        return 0.0, 1.0, 1.0
+    return float(a[j]), float(_RG[j // len(_SG)]), float(_SG[j % len(_SG)])
+
+
+def _tube(shape, xy: np.ndarray, r: float, s: float):
+    """Flat pixel indices and unit-amplitude values of a blurred-box tube along a polyline, with butt ends
+    (pieces of one vessel cut at a junction join without a seam)."""
+    from scipy.spatial import cKDTree
+    H, W = shape
+    reach = r + 3.0 * s + 1.0
+    x0, y0 = int(max(0, np.floor(xy[:, 0].min() - reach))), int(max(0, np.floor(xy[:, 1].min() - reach)))
+    x1, y1 = int(min(W - 1, np.ceil(xy[:, 0].max() + reach))), int(min(H - 1, np.ceil(xy[:, 1].max() + reach)))
+    if x1 < x0 or y1 < y0:
+        return np.zeros(0, np.int64), np.zeros(0, np.float32)
+    m = np.zeros((y1 - y0 + 1, x1 - x0 + 1), np.uint8)
+    Q = np.round(xy - [x0, y0]).astype(np.int32).reshape(-1, 1, 2)
+    cv2.polylines(m, [Q], False, 1, thickness=int(2 * np.ceil(reach)) + 1)
+    yy, xx = np.nonzero(m)
+    pix = np.stack([xx + x0, yy + y0], 1).astype(float)
+    P = _resample(xy, 0.5)
+    if len(P) < 2:
+        return np.zeros(0, np.int64), np.zeros(0, np.float32)
+    d, k = cKDTree(P).query(pix, distance_upper_bound=reach)
+    ok = np.isfinite(d)
+    t0 = (P[1] - P[0]) / max(np.hypot(*(P[1] - P[0])), 1e-9)
+    t1 = (P[-1] - P[-2]) / max(np.hypot(*(P[-1] - P[-2])), 1e-9)
+    ok &= ~((k == 0) & (((pix - P[0]) @ t0) < -0.5))
+    ok &= ~((k == len(P) - 1) & (((pix - P[-1]) @ t1) > 0.5))
+    idx = (pix[ok, 1].astype(np.int64) * W + pix[ok, 0].astype(np.int64))
+    return idx, _box(d[ok], r, s).astype(np.float32)
+
+
+class _Render:
+    """The candidate graph rendered additively in OD (Beer-Lambert: overlapping vessels add their densities)
+    and its residual against the cleaned OD target; per-edge noise-weighted gains for the MDL test."""
+
+    def __init__(self, OD, sigma2, edges, cfg):
+        self.shape, self.cfg = OD.shape, cfg
+        self.t = OD.ravel().astype(np.float64)
+        self.iw = 1.0 / sigma2.ravel().astype(np.float64)
+        self.R = np.zeros(self.t.size)
+        self.tubes = []
+        for e in edges:
+            idx, val = _tube(self.shape, e["xy"], e["r"], e["s"])
+            self.tubes.append((idx, val.astype(np.float64)))
+            np.add.at(self.R, idx, e["a"] * val)
+        self.a = np.array([e["a"] for e in edges], float)
+        self.alive = np.ones(len(edges), bool)
+
+    def gain(self, k: int) -> tuple[float, float]:
+        """Noise-weighted fall of the squared residual when edge k (re-fitted alone, a >= 0) is added to the
+        others: (sum p r_-k / s^2)^2 / sum p^2 / s^2, over the correlation area corr_px. Returns (gain, a)."""
+        idx, p = self.tubes[k]
+        if not len(idx):
+            return 0.0, 0.0
+        rk = self.t[idx] - self.R[idx] + self.a[k] * p
+        w = self.iw[idx]
+        num, den = float((p * rk * w).sum()), float((p * p * w).sum())
+        if num <= 0 or den <= 0:
+            return 0.0, 0.0
+        return num * num / den / self.cfg.corr_px, num / den
+
+    def set_amp(self, k: int, a: float):
+        idx, p = self.tubes[k]
+        np.add.at(self.R, idx, (a - self.a[k]) * p)
+        self.a[k] = a
+
+    def residual(self) -> np.ndarray:
+        return (self.t - self.R).reshape(self.shape).astype(np.float32)
+
+
+def _mdl_prune(OD, sigma2, edges, cfg):
+    """Greedy MDL: fit every edge's amplitude against the others (two Gauss-Seidel sweeps), then remove, one
+    at a time, the edge whose gain falls shortest of its description cost mdl_k (1 + length / mdl_len),
+    re-fitting its overlapping neighbours, until every edge pays for itself."""
+    rd = _Render(OD, sigma2, edges, cfg)
+    n = len(edges)
+    for _ in range(2):
+        for k in range(n):
+            rd.set_amp(k, rd.gain(k)[1])
+    cost = np.array([cfg.mdl_k * (1.0 + _plen(e["xy"]) / cfg.mdl_len) for e in edges])
+    g = np.array([rd.gain(k)[0] for k in range(n)])
+    owner = {}
+    for k, (idx, _) in enumerate(rd.tubes):
+        owner[k] = set(idx.tolist()) if len(idx) < 200000 else set()
+    while True:
+        cand = np.flatnonzero(rd.alive & (g < cost))
+        if not len(cand):
+            break
+        k = int(cand[np.lexsort((cand, g[cand] - cost[cand]))[0]])
+        rd.set_amp(k, 0.0)
+        rd.alive[k] = False
+        g[k] = np.inf
+        for j in np.flatnonzero(rd.alive):
+            if owner[j] & owner[k]:
+                gj, aj = rd.gain(j)
+                rd.set_amp(j, aj)
+                g[j] = rd.gain(j)[0]
+    for k in range(n):
+        edges[k]["a"] = float(rd.a[k])
+        edges[k]["gain"] = float(g[k]) if rd.alive[k] else 0.0
+    return rd.alive.tolist(), rd
+
+
+def _knots(junctions, edges, rd, cfg):
+    """The OD at a junction's centre against the additive render: two vessels crossing at different depths
+    add their densities (a dark knot, residual ~0 under the additive render), the lumens of a fork are a
+    union (the render over-predicts by about the thinner vessel's density: residual ~ -a_min). Stores
+    knot = mean residual in a disc of radius max(1.5, r_min / 2) / a_min."""
+    res = rd.residual()
+    H, W = res.shape
+    for J in junctions:
+        near = [e for e in edges if e["j"][0] == J["id"] or e["j"][1] == J["id"]]
+        if len(near) < 2:
+            J["knot"] = float("nan")
+            continue
+        amin = max(min(e["a"] for e in near), 1e-4)
+        rmin = min(e["r"] for e in near)
+        rad = max(1.5, 0.5 * rmin)
+        x, y = J["x"], J["y"]
+        y0, y1, x0, x1 = int(max(0, y - rad - 1)), int(min(H, y + rad + 2)), int(max(0, x - rad - 1)), int(min(W, x + rad + 2))
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        m = (xx - x) ** 2 + (yy - y) ** 2 <= rad * rad
+        J["knot"] = float(res[y0:y1, x0:x1][m].mean() / amin) if m.any() else float("nan")
+
+
+def _remove_ranges(traces: list, edges: list, keep: list, cfg: Config) -> list:
+    """Cut the pruned edges' index ranges out of their traces; the surviving runs become the traces."""
+    gone = {}
+    for e, k in zip(edges, keep):
+        if not k:
+            gone.setdefault(e["trace"], []).append(e["rng"])
+    kept_pts = {}
+    for e, k in zip(edges, keep):
+        if k:
+            kept_pts.setdefault(e["trace"], []).append(e["rng"])
+    out = []
+    for i, t in enumerate(traces):
+        if i not in gone:
+            out.append(t)
+            continue
+        n = len(t["xy"])
+        m = np.zeros(n, bool)
+        for a, b in kept_pts.get(i, []):
+            m[a:b + 1] = True
+        lab, nl = ndi.label(m)
+        for r in range(1, nl + 1):
+            ii = np.flatnonzero(lab == r)
+            if _plen(t["xy"][ii[0]:ii[-1] + 1]) < cfg.min_len:
+                continue
+            out.append({k_: (v[ii[0]:ii[-1] + 1].copy() if isinstance(v, np.ndarray) and len(v) == n else v)
+                        for k_, v in t.items()})
+    return out
+
+
+def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = None):
+    """Stage 8, iterative refinement (the lesson of diffusion models, deterministic like DDIM): a fixed
+    number of rounds of render, compare, prune and re-propose.
+
+    Each round: the graph (stage 7) is built from the traces; its edges get their width, blur and contrast
+    from cross-sections of the cleaned OD target (fit_profile); the graph is rendered additively in OD
+    (Beer-Lambert: crossing vessels add their densities); the residual is taken against OD = B - L of
+    stage 1 -- the image cleaned by the background fitted on the vesselness mask's negative, never a
+    vesselness map, whose response is distorted exactly at forks and crossings; edges whose removal barely
+    changes the noise-weighted squared residual are cut out of their traces (MDL, _mdl_prune); the residual
+    itself is passed again through stages 3-6 to propose what the graph does not yet explain (a vessel
+    masked by a stronger neighbour, an arm lost at a junction), and the new traces join the old ones. After
+    the last round the graph is assembled once more, pruned and re-assembled; the knot cue (OD at junction
+    centres against the additive render) is stored on each junction."""
+    s1 = pr["s1"]
+    OD, bg = s1["OD"], s1["bg"]
+    hp = OD - _gblur(OD, 8.0)
+    sig2 = np.maximum(_local_rms(hp, bg, 32.0), 1e-4) ** 2
+    for rnd in range(cfg.rounds + 1):
+        edges, junctions, traces = end_stopping(traces, cfg, OD)
+        for e in edges:
+            e["a"], e["r"], e["s"] = fit_profile(OD, e["xy"], e["w"])
+        keep, rd = _mdl_prune(OD, sig2, edges, cfg)
+        traces = _remove_ranges(traces, edges, keep, cfg)
+        if rnd < cfg.rounds and cfg.repropose:
+            res = rd.residual()
+            new = []
+            for ci, ch in enumerate(simple_cells(res, bg, cfg)):
+                U = surround(ch["U"], ch["sigma"], cfg) if cfg.surround else ch["U"]
+                C = association_field(U, ch["sigma"], cfg) if cfg.association else np.maximum(U, 0)
+                new += readout(C, ch["S"], cfg, chan=ci, t_high=cfg.t_high * cfg.re_k, t_low=cfg.t_low * cfg.re_k)
+            traces = merge_channels(new, cfg, accepted=traces)
+    edges, junctions, traces = end_stopping(traces, cfg, OD)
+    for k, J in enumerate(junctions):
+        J["id"] = k
+    for e in edges:
+        e["a"], e["r"], e["s"] = fit_profile(OD, e["xy"], e["w"])
+    rd = _Render(OD, sig2, edges, cfg)
+    for _ in range(2):
+        for k in range(len(edges)):
+            rd.set_amp(k, rd.gain(k)[1])
+    for k, e in enumerate(edges):
+        e["a"] = float(rd.a[k])
+    _knots(junctions, edges, rd, cfg)
+    if debug is not None:
+        debug.update(residual=rd.residual(), sig2=sig2)
+    return edges, junctions, traces
 
 
 # ======================================================================== the annotator
@@ -1073,7 +1329,10 @@ def run(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, debug: dict
         proposal: dict | None = None) -> dict:
     pr = proposal if proposal is not None else propose(image, valid, cfg)
     traces = [dict(t) for t in pr["traces"]]
-    edges, junctions, traces = end_stopping(traces, cfg, pr["s1"]["OD"])
+    if cfg.verify:
+        edges, junctions, traces = refine(pr, traces, cfg, debug)
+    else:
+        edges, junctions, traces = end_stopping(traces, cfg, pr["s1"]["OD"])
     if debug is not None:
         debug.update(pr, traces=traces, edges=edges, junctions=junctions)
     return _output(edges, junctions)
