@@ -23,13 +23,16 @@ only weakly better, and the diffusion-model idea did not help.**
   - About half of it, at most 0.08-0.09, is the V1-like orientation score that replaces the Hessian:
     elongated, phase-gated filters at 16 orientations, with every orientation kept at every pixel. Its
     clearest effect is line precision, +0.19-0.20 on 12 of 12 images.
-  - The other half is the pipeline around it, which helps a Hessian input too: the background fitted outside
-    the vesselness mask, tracing in (x, y, theta), and the end-stopping graph logic.
-- **Contour integration and surround suppression are modest.** At thresholds tuned for each variant, they add
-  precision on noisy single frames: junction precision +0.18 on 6 of 6 frames. They cost some recall, and
-  they do not help on averaged stills.
+  - The other half is the rest of the pipeline, which helps a Hessian input too. It is not separated further.
+    It covers the background fitted outside the vesselness mask, tracing in (x, y, theta), the end-stopping
+    graph logic, the contextual stages, the refinement, the compound prior and the development tuning.
+- **Contour integration and surround suppression buy precision on noisy single frames, and nothing on averaged
+  stills.** Against V1 only, each at its own development-best thresholds, they add +0.10 junction precision and
+  +0.09 line precision on 6 of 6 frames, at a small cost in line recall. On averaged stills they are neutral to
+  slightly negative. Over both kinds the composite is unchanged.
 - **The diffusion-model half came back negative.** The render, compare and prune refinement borrowed from
-  diffusion models is neutral for line F1 and lowers recall. Re-proposing vessels from the residual hurts.
+  diffusion models raises junction precision (+0.07 on 6 of 6 frames) but lowers line and crossing recall, so
+  it is neutral on the composite. Re-proposing vessels from the residual hurts.
   - The iterative completion that does help, the association field, comes from the contour-integration
     literature (stochastic completion fields), not from diffusion models.
 - **Determinism and speed.** Two runs give the same output digest (to 0.001 px) on every image, and an image
@@ -155,7 +158,8 @@ from the JSONs:
 stage 3.
 - **The swap.** `annotate_hessian_score` keeps the same pipeline, but stage 3 is vesselmap's ridge measure
   s² max(0, -l1 - |l2|) on the same cleaned OD. It sits in the Hessian's along-vessel orientation layer only,
-  so each pixel and scale has one orientation.
+  so each pixel has one orientation per scale. After the max over a channel's scales, a pixel can carry
+  several.
 - **Two bin assignments.** `annotate_hessian_score_nearest` puts the whole strength in the nearest of the 16
   orientation bins; `annotate_hessian_score` splits it linearly between the two nearest.
 - **Tuning.** Only the thresholds were re-tuned, on the development scenes. NOTES has the design and the grids.
@@ -174,20 +178,24 @@ The composite is the mean of line F1, strict junction F1, balanced coarse type a
 - **About half of the held-out gap is the orientation score.**
   - Full against baseline: 0.68 against 0.51 on the composite (mean of both kinds), a gap of 0.17.
   - With a Hessian layer in the same pipeline it is 0.59-0.60. Keeping the full orientation score is
-    therefore worth 0.08-0.09 of the 0.17, and the pipeline the other 0.08-0.09.
-  - On the development scenes the orientation score's share was smaller: 0.055-0.083 of 0.152, a third to a
-    half.
+    therefore worth 0.08-0.09 of the 0.17. Everything else in the pipeline, not separated, is worth the other
+    0.08-0.09.
+  - On the development scenes the share was 0.055-0.083 of 0.152 (36-55 %): smaller for the nearest-bin
+    variant, about the same for the linear split.
   - This share is an upper bound: every downstream parameter was tuned together with the orientation score.
 - **Line precision is where it shows most.** Full minus the nearest-bin Hessian variant: line precision +0.19
   / +0.20 and line F1 +0.10 / +0.11 (6 of 6 images in each kind), strict junction F1 +0.09 / +0.16 (6 of 6).
   - The elongated, phase-gated filters keep texture and wall echoes out at a threshold that still reaches
     faint vessels.
 - **Crossings depend on the image kind.**
-  - On averaged stills the pipeline fed one Hessian orientation per pixel (nearest bin) finds crossings as
-    well as the orientation score: 0.31 against 0.32. The SE(2) tracing and end-stopping logic carry that.
+  - On averaged stills the pipeline fed Hessian orientations (nearest bin) finds crossings as well as the
+    orientation score: 0.31 against 0.32 (the orientation score higher on 3 images, lower on 2, tied on 1).
+  - This does not show that tracing alone carries crossings. The Hessian variant has one orientation per
+    pixel and scale, so the max over scales can give a pixel two. A strictly one-orientation-per-pixel
+    variant was not run.
   - On single frames the orientation score doubles crossing recall: 0.25 against 0.11-0.13.
 - **What the swap does not separate.** Stage 3 differs from the Hessian in three ways at once:
-  - several orientations per pixel;
+  - several orientations per pixel (only partly: the Hessian variant can carry several across scales);
   - filters elongated along the vessel;
   - odd-symmetric phase gating.
 
@@ -209,21 +217,28 @@ Held-out means; each pair is average / frame. "V1 only" drops stages 4, 5 and 8.
 | background leak fixed (`bg_traced`) | 0.84 / 0.80 | 0.91 / 0.86 | 0.72 / 0.64 | 0.75 / 0.65 | 0.42 / 0.24 | 0.57 / 0.50 |
 | no compound-radius prior | 0.83 / 0.81 | 0.93 / 0.89 | 0.70 / 0.66 | 0.80 / 0.78 | 0.37 / 0.28 | 0.55 / 0.46 |
 
-- **Contour integration and surround suppression buy precision on frames, and only modestly.**
-  - Compared at each variant's own development-best thresholds (full minus V1 only), the contextual stages
-    add on single frames:
-    - junction precision +0.18 (higher on 6 of 6 frames);
-    - line precision +0.11 (6 of 6);
-    - junction F1 +0.05 (6 of 6).
-  - They cost recall: line recall -0.04 (lower on 6 of 6 frames) and crossing recall -0.04 (lower on 3 of 6,
-    tied on 3).
-  - On averaged stills they add nothing, and they cost crossing recall (0.32 against 0.41, lower on 5 of 6).
-  - At the full annotator's shared thresholds the frame gap looks much larger (junction precision 0.27
-    against 0.78). Most of that is V1 only running at a looser operating point.
-- **Of the two contextual stages, the association field matters more.** At shared thresholds it is worth
-  +0.20 junction precision on frames (6 of 6), while the surround is worth +0.09 and leaves line F1
-  unchanged. This is contour integration doing what it is thought to do in vision: a line is salient by its
-  collinear support, so isolated texture loses.
+- **Contour integration and surround suppression buy precision on frames, and only modestly.** Compared at
+  each variant's own development-best thresholds (stages 1-7 minus V1 only):
+  - On single frames they add junction precision +0.10 (higher on 6 of 6 frames), line precision +0.09 (6 of
+    6), junction F1 +0.04 and line F1 +0.03 (5 of 6 each). Line recall is 0.02 lower (5 of 6).
+  - On averaged stills they are neutral to slightly negative: crossing recall -0.07, junction precision
+    -0.02.
+- **With the refinement as well (full minus V1 only):**
+  - On frames: junction precision +0.18 (6 of 6) and junction F1 +0.05 (6 of 6). Line recall is 0.04 lower
+    (6 of 6), and crossing recall 0.04 lower (3 of 6 lower, 3 tied).
+  - On averaged stills, junction F1 is 0.02 lower on 6 of 6 images, and crossing recall is 0.32 against 0.41
+    (lower on 5 of 6).
+  - Over both kinds, the composite is unchanged (+0.004, higher on 6 of 12 images).
+- **The shared-threshold ablation exaggerates the effect.** At the full annotator's thresholds the frame gap
+  looks much larger: junction precision 0.27 against 0.78. Most of that is V1 only running at a looser
+  operating point.
+- **Of the two contextual stages, the association field matters more.** It is worth +0.20 junction precision
+  on frames (6 of 6), while the surround is worth +0.09 and leaves line F1 unchanged.
+  - These single-stage ablations run at the full annotator's thresholds, which also shift the operating
+    point, so +0.20 and +0.09 are upper bounds. At their own thresholds on the development scenes the
+    variants were within 0.01 of each other.
+  - The direction matches what contour integration is thought to do in vision: a line is salient by its
+    collinear support, so isolated texture loses. The size of the effect is modest.
 - **The diffusion-style refinement (stage 8) is neutral for line F1 and lowers recall.**
   - It raises junction precision: +0.02 on averages (higher on 5 of 6) and +0.07 on frames (6 of 6).
   - It lowers line recall on all 12 images, and frame crossing recall from 0.30 to 0.25 (lower on 3 of 6
@@ -327,8 +342,9 @@ texture. Right: the full annotator. V1 only at its own, stricter thresholds is m
 
 ## What to try next
 
-1. **The pipeline around vesselmap.** Half the gain works with Hessian input too. Three pieces could be used
-   with vesselmap's existing ridges:
+1. **The pipeline around vesselmap (untested).** Half the measured gain worked with Hessian input too, but
+   that half mixes several parts and was measured against the Hessian baseline, not vesselmap. Three pieces
+   are candidates to try with vesselmap's existing ridges:
    - the background fitted outside the vesselness mask;
    - the tracing in (x, y, theta);
    - the end-stopping graph logic.
@@ -368,15 +384,17 @@ python -m experiments.neuromimetic.evaluate --scenes $S --out results \
 python -m experiments.neuromimetic.report results --ceiling --scenes $S   # table_all.md, paired.md, ceiling.json
 python -m experiments.neuromimetic.figures scenes/healthy_s001 --kind frame --crop 140,170,200,300 --zoom 2 --cols 2 \
     --annotators experiments.neuromimetic.baseline_hessian:annotate experiments.neuromimetic.baseline_vesselmap:annotate \
-                 $N:annotate -o heldout_frame_comparison.png
+                 $N:annotate -o experiments/neuromimetic/figures/heldout_frame_comparison.jpg
 python -m experiments.neuromimetic.figures scenes/healthy_s001 --kind frame --crop 140,170,200,300 --zoom 2 \
-    --annotators $N:annotate_v1_only $N:annotate -o heldout_frame_ablation.png
+    --annotators $N:annotate_v1_only $N:annotate -o experiments/neuromimetic/figures/heldout_frame_ablation.jpg
 ```
 
 - **Scene folder names.** The scene CLI names folders `healthy_s001` and so on. `results/heldout` names them
   `healthy_s001_480x768`, so a reproduced row's `scene` field differs.
 - **Reuse of results.** `evaluate.py` reuses any `<out>/<annotator>.json` that already exists; delete it to
   re-run.
+- **Figures.** OpenCV writes JPEG at quality 95; the committed figures were saved at quality 85, so the bytes
+  differ but the content is the same.
 
 Files:
 - `harness.py`: the scorer.
