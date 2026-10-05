@@ -24,7 +24,9 @@ frequency, high contrast sensitivity, coarse orientation):
     depths is an overlap). Its profile comes from cross-sections of the new target (fit_profiles, box ->
     cylinder). The joint fit and the MDL / wide-edge / flank tests then judge it like every other edge.
     Provisional (pipeline Config.deep, off): on tier 2 it adds +0.0032 +- 0.0026 on top of (a), mostly on one
-    image (batch 6); (a) alone is confirmed (+0.0014 +- 0.0005, 9 of 10 images up).
+    image (batch 6). (a) alone is provisional too (Config.coarse, off; batch 7): +0.0014 +- 0.0008 over the 5
+    scenes (t 1.83, 2 scenes up), and without (b) the deep OD it puts back has no cause, so neighbouring
+    vessels absorb it (pathologic average: contrast bias near the novel ridges -0.04 -> +0.38).
 
 Only image-derived data are read (log I, valid, stage 1's masks, the proposed network).
 """

@@ -4,7 +4,7 @@
    cleaned target OD = B - log I (stage 1, background fitted on the vesselness mask's negative), traced
    vessels cut at typed junctions, OD profiles along them, and the texture variance map of its stage 8.
 2. proposals.build_network turns the proposal into a spline network (nodes at forks / compounds / free ends,
-   crossings pass through without a node). The coarse channel (coarse.py; Config.coarse) adds the novel
+   crossings pass through without a node). The coarse channel (coarse.py; Config.coarse, provisional, off) adds the novel
    coarse ridges of log I to the retarget's vesselness mask (3), so the final fit sees the deep vessels' OD;
    with Config.deep (provisional, off) it also adds free DEEP edges read out from that cleaner target. Joint
    fit and MDL stay on stage 1's target (a cleaner target early drags the centrelines: E1).
@@ -41,7 +41,9 @@ use_vesselmap()
 class Config:
     fit: FitConfig = field(default_factory=FitConfig)
     nm_verify: bool = True          # use the neuromimetic stage-8 (pruned) graph as the proposal
-    coarse: bool = True             # coarse channel: novel coarse ridges out of the retarget's B (coarse.py)
+    coarse: bool = False            # coarse channel: novel coarse ridges out of the retarget's B (coarse.py).
+                                    # Off (provisional, batch 7): +0.0014 +- 0.0008 per scene (t 1.83), and
+                                    # its explained gain is partly OD absorbed by neighbouring vessels
     deep: bool = False              # ... and deep edges proposed from them. Off (provisional): tier 2
                                     # +0.0032 +- 0.0026 on top of the ridges, one image (batch 6)
     step: float = 0.5               # px, sample spacing of the exported edges

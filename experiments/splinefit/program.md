@@ -105,22 +105,32 @@ the tail of results.tsv. Find the last kept commit (the last `keep` row) and the
    multi-seed controls (`python -m experiments.splinefit.controls --json ...`, 3-4 min); if its
    controls_score falls below the last kept state's, or the empty controls gain false length, it is
    discarded whatever tier 1 says (the single-seed battery under-states false alarms). Check also that a
-   tier-1 gain does not rest on one crop (`python -m experiments.splinefit.paired A.json B.json`: the
-   leave-one-out range must stay above 0).
+   tier-1 gain does not rest on one scene (`python -m experiments.splinefit.paired A.json B.json`: the
+   leave-one-out range over scenes must stay above 0).
 7. **Log** one row in `$SPLINEFIT_WORK/results.tsv` (tab-separated, never committed; LOG.md carries the
    summary), and in LOG.md record whether each prediction held.
 8. **Record** (kept changes): `python -m experiments.splinefit.residuals --fast 0 2 8 --probe fork_wide cross_a20 empty_average`
    and look at the residuals at junctions and crossings; note what changed in LOG.md.
 9. Every ~4 kept experiments, and at the end of each batch: **tier 2**
    (`python -m experiments.splinefit.run_experiment --tier 2 --repeat 2 > run2.log 2>&1`, ~30 min, run in the
-   background while you think). Compare it PAIRED, per image, with the last confirmed run
-   (`python -m experiments.splinefit.paired <last confirmed tier2.json> <new tier2.json>`):
-   - mean > 2 SE: a real gain; log a `confirm` row;
-   - within +-2 SE (non-inferior): keep only if the batch's kept changes are simplifications (equal or less
-     code); added code that is only non-inferior on whole images is PROVISIONAL: turn it off by default (or
-     reset) and log a `regress` row saying so;
-   - mean < -2 SE, or regressed: reset to the last tier-2-confirmed commit; log a `regress` row. Push kept, confirmed work
+   background while you think). Compare it PAIRED, **per scene** (batch 7, review: the average and the frame
+   of a scene share their vessels, so the unit is the scene, n = 5, not the image), with the last confirmed
+   run (`python -m experiments.splinefit.paired <last confirmed tier2.json> <new tier2.json>`); it prints a
+   verdict:
+   - **confirmed**: mean > 2 SE over scenes, no scene below -5e-4, and no GUARD vetoed; log a `confirm` row;
+   - **provisional** (within +-2 SE, or a guard veto): keep only if the batch's kept changes are
+     simplifications (equal or less code); added code that is only non-inferior is PROVISIONAL: turn it off
+     by default (or reset) and log a `regress` row saying so;
+   - **regressed** (mean < -2 SE): reset to the last tier-2-confirmed commit; log a `regress` row.
+   'up' / 'down' count only scenes that moved by more than 5e-4 (the pipeline is deterministic: tiny non-zero
+   changes are not evidence). **Guards** (batch 7, review): blur_err_px, contrast_rel_err, |contrast_bias|,
+   |blur_bias_px|, width_rel_err, |width_bias| are errors the composite does not weigh; explained OD can be
+   bought by letting a vessel absorb OD that nothing in the model causes, which shows up there. Pre-register
+   the direction of each guard with the composite parts; a guard that worsens beyond its threshold (mean over
+   scenes, or twice it on any one scene; paired.GUARDS) vetoes the confirmation. Push kept, confirmed work
    (`git push -u origin claude/elegant-johnson-8n78yv`, retry 4x with 2/4/8/16 s backoff on network errors).
+   Add new dev scenes (healthy_s009+), if any are generated, to the dev set before confirming a change whose
+   gain rests on few scenes.
 
 results.tsv columns (tab-separated; the header is the first line):
 

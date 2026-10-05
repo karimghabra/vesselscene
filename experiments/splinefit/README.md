@@ -81,10 +81,12 @@ multi-seed controls.
 Since batch 6 a coarse 'magnocellular' channel (`coarse.py`) cleans the target further: Hessian ridges of
 log I at sigma 4-16 px that are elongated and NOVEL (mostly outside stage 1's mask) join the retarget's
 vesselness mask, so B is re-estimated on the mask's negative without the deep, blurred vessels that stage 1's
-fine-scale mask lets into it (tier 2 +0.0014 +- 0.0005, 9 of 10 images up; s004 and pathologic target_keep
-+0.02 to +0.06). The same channel can propose free DEEP edges (no node where they pass under a sharp vessel;
-`pipeline.Config.deep`, provisional, off). `paired.py` is the paired per-image test of program.md's
-tier-2 confirm rule.
+fine-scale mask lets into it (s004 and pathologic target_keep +0.02 to +0.06). It is provisional and off
+(`pipeline.Config.coarse`, batch 7): +0.0014 +- 0.0008 over the 5 scenes, and without a cause for the deep
+OD it restores, neighbouring vessels absorb it as contrast. The same channel can propose free DEEP edges (no
+node where they pass under a sharp vessel; `pipeline.Config.deep`, provisional, off). `paired.py` is the
+paired per-SCENE test of program.md's tier-2 confirm rule, with guard metrics (blur, contrast and width
+errors and biases) that can veto a confirmation.
 
 ## How to run
 
