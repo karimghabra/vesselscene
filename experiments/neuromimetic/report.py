@@ -109,6 +109,8 @@ def paired(results: dict, kinds, full: str = FULL) -> str:
     out = []
     for kind in kinds:
         a = {i: r for i, r in a_all.items() if i[1] == kind}
+        if not a:                                     # no rows of the full annotator for this kind
+            continue
         out.append(f"\n**{kind}: full annotator minus each (mean per-image difference, images where the full "
                    f"annotator is higher / all)**\n")
         out.append("| minus | " + " | ".join(c[1] for c in PAIRED) + " |")
@@ -125,7 +127,7 @@ def paired(results: dict, kinds, full: str = FULL) -> str:
                      and np.isfinite(a[i].get(k, np.nan)) and np.isfinite(b[i].get(k, np.nan))]
                 cells.append(f"{np.mean(d):+.2f} ({sum(x > 0 for x in d)}/{len(d)})" if d else "-")
             out.append(f"| {short(name)} | " + " | ".join(cells) + " |")
-    return "\n".join(out) + "\n"
+    return "\n".join(out)
 
 
 def main(argv=None):
@@ -154,6 +156,8 @@ def main(argv=None):
         with open(os.path.join(a.results_dir, "paired.md"), "w") as fh:
             fh.write(paired(results, kinds))
         written.append("paired.md")
+    elif os.path.exists(os.path.join(a.results_dir, "paired.md")):
+        print(f"warning: no {FULL} rows: the existing paired.md was left as it is")
     print("wrote", ", ".join(os.path.join(a.results_dir, w) for w in ([CEILING + ".json"] if a.ceiling else [])
                              + written))
 

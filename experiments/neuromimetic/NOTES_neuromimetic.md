@@ -415,8 +415,11 @@ differs from `annotate` in all of these at once, so it cannot answer this.
   `-s² l1` is its maximum over directions, and it is simple_cells' even filter at elongation 1.
   - The RMS comes from the same `_local_rms_stack` as simple_cells: Winsorised at 3x the global robust RMS,
     pooled over orientations, window `max(24, 4 s)` px.
-  - So `t_high` / `t_low` are in the same CNR units as for the orientation score.
-- **One orientation per pixel and scale.** The normalised strength goes into the layers of the Hessian's
+  - So rho is noise-normalised the same way as the orientation score (same RMS estimator). It is not the
+    same false-alarm scale: rho is clipped and suppressed by the anisotropy term, so in noise it is mostly
+    0. The operating points differ, which is why the thresholds were re-swept.
+- **One orientation per pixel and scale** (not strictly per pixel: see the max over scales below). The
+  normalised strength goes into the layers of the Hessian's
   along-vessel direction (perpendicular to l1's eigenvector), split linearly between the two nearest of the
   16 bins. Every other layer is 0.
 - **Max over scales.** Per channel, the per-layer max over its scales, the same code as simple_cells.
@@ -533,18 +536,23 @@ cached sweep, not from an entry point:
 
 **What it says** (dev only, 6 images; differences of about 0.01 are noise). Composites below are the mean of
 average and frame.
-- **About half of the gap over the Hessian baseline is the orientation score; the other half is the
-  pipeline.**
+- **About a third of the gap over the Hessian baseline is the orientation score; two thirds are the
+  pipeline** (measured against the stronger Hessian variant, nearest bin; the review's correction).
   - `annotate` against `baseline_hessian`: 0.668 against 0.516, a gap of 0.152.
-  - Swapping only stage 3 for the Hessian (`annotate_hessian_score`, re-tuned) gives 0.585. Keeping the full
-    orientation score is therefore worth 0.083, or 0.055 against the more generous nearest-bin variant
-    (0.613).
-  - The rest of the pipeline, fed with Hessian orientations, is worth 0.069 (or 0.097) over the baseline.
+  - Swapping only stage 3 for the Hessian, re-tuned, gives 0.613 with the nearest-bin assignment
+    (`annotate_hessian_score_nearest`) and 0.585 with the linear split (`annotate_hessian_score`). Keeping the
+    full orientation score is therefore worth 0.055 against the stronger variant (36 % of the gap), and 0.083
+    against the weaker one.
+  - The rest of the pipeline, fed with Hessian orientations, is worth 0.097 (or 0.069) over the baseline.
     This covers the background, the SE(2) tracker, the graph logic and compound prior, and the refinement.
+  - **This is an upper bound on the orientation score's share.** Only t_high / t_low were re-tuned for the
+    Hessian. Every downstream parameter (flank_k, assoc_gain, assoc_len, claim_k, min_len, mdl_k, cnr_min,
+    compound_r, ...) was tuned on the same dev scenes together with the orientation score.
 - **The orientation score matters more without context.** Without stages 4, 5 and 8, at each variant's own
   thresholds:
   - orientation score (`annotate_v1_only_own`) 0.674, against 0.558 for the Hessian: a gap of 0.116;
-  - the contextual stages lift the Hessian variant by only 0.027 (0.558 to 0.585);
+  - the contextual stages lift the Hessian variant by only 0.027 (0.558 to 0.585, linear split; the
+    context-free check was not run with nearest bins);
   - for the orientation score they are neutral on the composite (0.674 against 0.668).
 - **Where the orientation score wins:**
   - **Crossings.** Crossing recall is 0.375 / 0.333 with the orientation score, 0.195 / 0.153 with the
@@ -563,10 +571,13 @@ average and frame.
     against 0.651 / 0.587. Junction detection itself comes mostly from stage 7's end-stopping logic.
   - Coarse balanced typing is 0.569 / 0.514 against 0.581 / 0.616, with fewer crossings to type.
 - **Construction checks.**
-  - The linear split costs 0.028 against the nearest bin; the half-strength layers lower junction F1 most.
-  - One scale per pixel ('pixel', 0.579) is no different from the per-layer max (0.585).
-  - So the Hessian's deficit is not an artefact of the binning. It is what one orientation per pixel, with
-    no elongation and no phase gating, gives in this pipeline.
+  - The linear split costs 0.028 against the nearest bin (about a third of the linear variant's 0.083 gap);
+    the half-strength layers lower junction F1 most. The binning is therefore part of the linear variant's
+    deficit, and the nearest-bin variant is the fair headline.
+  - One scale per pixel ('pixel', 0.579, linear split) is no different from the per-layer max (0.585). The
+    strictest form, one scale and the nearest bin, was not measured.
+  - What remains with the nearest bin (0.055 on the composite, and half the crossing recall) is what one
+    orientation per pixel and scale, with no elongation and no phase gating, gives in this pipeline.
 - **What this does not separate.** Stage 3's design has three ingredients: several orientations per pixel
   (the score itself), elongated filters along the vessel, and odd-symmetric phase gating. This ablation
   swaps all three at once. An elongation-1 orientation score, and one without the odd partner, would split
