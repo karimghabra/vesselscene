@@ -26,7 +26,9 @@ frequency, high contrast sensitivity, coarse orientation):
     Provisional (pipeline Config.deep, off): on tier 2 it adds +0.0032 +- 0.0026 on top of (a), mostly on one
     image (batch 6). (a) alone is provisional too (Config.coarse, off; batch 7): +0.0014 +- 0.0008 over the 5
     scenes (t 1.83, 2 scenes up), and without (b) the deep OD it puts back has no cause, so neighbouring
-    vessels absorb it (pathologic average: contrast bias near the novel ridges -0.04 -> +0.38).
+    vessels absorb it (pathologic average: contrast bias near the novel ridges -0.04 -> +0.38). Taking the
+    ridge pixels out of the final fit's data term instead (E21, discarded) removes the absorption but lets
+    the profiles there drift without data (explained below E9): the OD needs its cause, not silence.
 
 Only image-derived data are read (log I, valid, stage 1's masks, the proposed network).
 """

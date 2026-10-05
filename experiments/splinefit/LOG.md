@@ -1194,3 +1194,107 @@ probes see almost nothing of this change (no deep vessels in them); tier 2 and t
    design moves only the 4 hard images unless the effect is very even across them. A pre-registered
    directional criterion (named images up, the rest within +-0.002) is the alternative; it held for E20 on
    every image but was not the rule in force, so it was not used.
+
+## Batch 7
+
+Setup: last kept = b4a46f6 (E20a; tier 1 0.787735); last tier-2 confirm row b4a46f6 (0.761983, under the
+per-image rule); pushed head 43f75ba. Dev set: still the 5 frozen scenes (no healthy_s009+ generated).
+
+### Priority 1: the review's findings on E20a (both confirmed; fixed)
+
+Finding 1 (E20a's 'confirmed' counts the average and the frame of a scene as independent images).
+Re-computed from runs/e9_tier2.json and b6/e20_nodeep_tier2.json, averaging the two kinds per scene (n = 5):
+per-scene deltas s000 +0.00012, s004 +0.00279, s007 +0.00036, s008 +0.00003, pathologic +0.00360; mean
++0.00138, SE 0.00075, t 1.83 (below 2 SE); width t 2.00, explained t 1.52. Per image (the old test) the same
+data gave t 2.53 because s004 (+0.0040 / +0.0016) and pathologic (+0.0043 / +0.0029) each count twice.
+Confirmed exactly. Fixes (R1):
+- `paired.py` groups by scene (kinds and crops averaged first; `--by image` keeps the old test for
+  comparison), counts up / down only beyond a materiality of 5e-4 (E20a: 2 up, 0 down, not '9 up'), and
+  prints a verdict (confirmed / provisional / regressed). program.md's tier-2 rule says so.
+- E20a is re-labelled PROVISIONAL: `pipeline.Config.coarse` now defaults to False, the E9 / R0 pipeline
+  exactly (the coarse channel is the only code E20a added to the path). No healthy_s009+ dev scene exists yet.
+- Re-checked under the grouped rule: E20 (with deep edges) t 1.50, E14 t 0.19 (both already provisional);
+  E9 vs E6 and E6 vs E3 are simplifications at mean ~0 (non-inferior, kept by the simplicity rule).
+
+Finding 2 (the explained gain on the hardest image is mostly neighbouring vessels absorbing the deep OD that
+the new target restores; the blur and contrast errors it costs are not in the composite). Confirmed from
+the review's whole-image diagnostic (b6review2/whole.py, pathologic_s000 average; its digests reproduce the
+tier-2 rows) and by the grouped guard metrics of E20a against E9 (per scene, s000 s004 s007 s008 path):
+blur_err_px +0.0001 +0.0302 -0.0061 +0.0044 +0.0572; |contrast_bias| +0.003 +0.045 +0.003 +0.001 -0.063 (the
+pathologic bias flips sign: -0.077 -> -0.014 on its far samples, -0.035 -> +0.376 near the ridges);
+|blur_bias_px| mean +0.041. E20 (deep edges ON, the missing cause supplied) does not show it: blur_err mean
++0.0006, contrast_rel_err -0.0072, |contrast_bias| -0.0068. This is the explaining-away failure in one line:
+a fuller target without its cause is absorbed by the nearest causes the model has.
+Fixes: GUARD metrics in the keep rule (paired.GUARDS: blur_err_px 0.02 px, contrast_rel_err 0.005,
+|contrast_bias| 0.02, |blur_bias_px| 0.05 px, width_rel_err 0.005, |width_bias| 0.02; a guard whose mean over
+scenes worsens beyond its threshold, or one scene beyond twice it, vetoes a confirmation; pre-register their
+direction). The thresholds were set with E14, E20 and E20a in view, so they are calibrated on these, not
+tested by them: E20a is vetoed (blur_err pathologic +0.057, |contrast_bias| s004 +0.045), E14 is vetoed
+(blur_err, contrast_rel_err, width_rel_err), E20 passes. Then E21 below (the review's second remedy).
+
+### E21: the novel coarse ridges stay out of B, and out of the final fit's data term (pre-registered)
+
+Hypothesis: the far-from-ridge part of E20a's gain is real (a background no longer pulled up by deep
+vessels; pathologic far samples width_rel 0.211 -> 0.199, contrast_rel 0.329 -> 0.318), the near-ridge part is
+failed explaining-away. Give the final fit no data where only an absent cause could explain it: pixels in the
+coarse ridge mask (novel coarse ridges, dilated by their sigma) weigh 0 in the final fit's loss
+(FitConfig.ridge_w = 0); they stay out of B (the residual rule: the mask's negative cleans the background).
+A vessel crossing or running along a deep one keeps its joint-stage profile there (smooth along the edge).
+Change: coarse_stage1 also returns the ridge mask; fit_network multiplies the final-fit precision by ridge_w
+on it; Config.coarse on. One variable against E20a (the ridge pixels' final-fit weight 1 -> 0).
+Predictions (against E20a; tier 1 and tier 2): graph and pos identical (geometry frozen in the final fit);
+width about equal (its gain was mostly far from the ridges); explained DOWN (the near-ridge absorption
+removed; pathologic about -0.01, s004 a little), still at or above E9; probes: identical except the ones with
+a novel ridge (cross_a45_wide_over_thin width back up toward R0); guards (against E9): pathologic
+contrast_bias near the ridges back to about E9's -0.04 (from +0.38), blur_err_px pathologic and s004 back to
+within 0.02 of E9, no veto. Tier 2 against E9 (per scene): +0.0003..+0.0010, s004 and pathologic carrying it;
+expected verdict PROVISIONAL (non-inferior added code), unless the far gain alone clears 2 SE.
+
+Result (tier 1, 1f862f7; scratch b7/e21b_tier1.json, the patch in b7/e21.patch): composite 0.784410 (R1 0.785309,
+E20a 0.787735), graph 0.609913 and pos 0.752174 identical (held), width 0.767566 (= E9, not E20a), explained
+0.766438 (E9 0.772348, E20a 0.799228), explained_junction 0.751995, probes 0.882833, digest a19dca6426d49ca3.
+Per scene against R1: -0.0027 -0.0033 +0.0026 -0.0012 -0.0004, t -0.95; guards contrast_rel_err,
+|contrast_bias| and width_rel_err veto. DISCARD (below R1, added code); reset to R1.
+(The first run, 3c90cc8, scored 0.779913: vesselmap renders no pixel of weight 0, so the exported render was
+blank on the ridge mask. Fixed in 1f862f7 by rendering the returned model with the full weights: a bug in
+the change, re-run per the crash policy.)
+Near/far on pathologic average (b7/nearfar.py, the review's split; E9 / E20a / E21):
+| true samples | contrast_bias | contrast_rel | blur_bias | blur_err | width_rel |
+|---|---|---|---|---|---|
+| near ridges | -0.035 / +0.376 / -0.046 | 0.368 / 0.465 / 0.368 | +0.02 / -0.005 / -0.223 | 1.53 / 1.58 / 1.64 | 0.496 / 0.497 / 0.508 |
+| far | -0.077 / -0.026 / -0.054 | 0.329 / 0.318 / 0.305 | +0.45 / +0.54 / +0.50 | 1.44 / 1.48 / 1.43 | 0.211 / 0.199 / 0.202 |
+Explained on that image: +0.0009 against E9 (E20a +0.0177): near-ridge footprint -0.0024, far +0.0036.
+Which predictions held: the absorption is gone (near contrast bias back to E9's level) and the far gain
+stays (contrast_rel 0.305, the best of the three). NOT held: explained fell below E9 on the fast crops, because
+the vessels inside the ridge mask (16 % of the s000 average crop; dilated by up to 16 px) have no data in the
+final fit and their profiles drift under the priors and the along-edge smoothness (s000 average crop: an
+edge wholly in the mask a 0.099 -> 0.058; pathologic near-ridge blur bias -0.22). Deafferentation is not
+explaining away: a region with no input is filled in from the neighbours' priors, and that is worse than
+the biased input it replaced.
+
+### Batch 7 summary
+
+| # | commit | change | tier-1 composite | graph | pos | width | explained | probe_score | status | prediction held? |
+|---|---|---|---|---|---|---|---|---|---|---|
+| R1 | 70c6072 | paired per scene + guards; Config.coarse off (E20a provisional) | 0.785309 | 0.610 | 0.752 | 0.768 | 0.772 | 0.884 | keep (review) | yes: E9 digest d56fee848ca3e349 |
+| E21 | 1f862f7 | coarse on, ridge pixels out of the final fit's data term | 0.784410 | 0.610 | 0.752 | 0.768 | 0.766 | 0.883 | discard | partly: absorption gone, explained below E9 |
+
+**Tier 2:** see below. Pushed state: R1, the E9 pipeline (coarse channel, deep edges and residual
+re-proposal all provisional, off).
+
+**What the batch taught.**
+1. The unit of replication is the scene. With n = 5 scenes, of which 2 carry deep vessels, no change that
+   acts only on deep vessels can reach 2 SE unless it is very even; the honest remedy is more scenes
+   (healthy_s009+), not a looser rule.
+2. The guards separate absorbing from explaining: E20a (ridges without causes) is vetoed by blur and contrast
+   guards, E20 (ridges plus deep edges, the cause) passes every guard and has the larger composite gain
+   (+0.0046, t 1.50). The deep edges are therefore the part to pursue, not the part to drop.
+3. Silencing the unexplained pixels (E21) removes the absorption but the region then has no input and its
+   vessels drift: worse than E9. The OD needs a cause in the model.
+
+**Directions for the next batch (ranked).**
+1. E20 (coarse ridges + gated deep edges) is the candidate: re-test it, with the guards, once more dev scenes
+   exist; meanwhile record per deep edge on s004 and pathologic (on-truth fraction, depth of the matched
+   true vessel, effect on junction F1) and pre-register a gate.
+2. Width identifiability (blur as optics: a per-image PSF floor on s).
+3. Topology moves by fit comparison at event clusters (fork / crossing / T).
