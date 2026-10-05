@@ -22,10 +22,10 @@ frame:
 
 | dev, mean of 3 scenes | centreline F1 | junction F1 | junction F1 strict | coarse type acc. (majority ref.) | coarse type balanced | crossing R / P | edge cover | s / image |
 |---|---|---|---|---|---|---|---|---|
-| neuromimetic `annotate`, average | **0.807** | **0.714** | **0.667** | **0.545** (0.530) | **0.594** | 0.36 / 0.55 | **0.654** | 6.9 |
+| neuromimetic `annotate`, average | **0.805** | **0.694** | **0.651** | **0.549** (0.522) | **0.581** | 0.38 / 0.57 | **0.649** | 6.5 |
 | Hessian baseline, average | 0.678 | 0.539 | 0.487 | 0.375 (0.595) | 0.393 | 0.06 / 0.24 | 0.528 | 0.8 |
 | vesselmap (LIMBUS), average * | 0.684 | 0.607 | – | 0.320 | – | 0.40 / 0.16 | 0.610 | 564 |
-| neuromimetic `annotate`, frame | **0.801** | **0.616** | **0.594** | **0.515** (0.459) | **0.575** | 0.31 / 0.46 | **0.653** | 6.5 |
+| neuromimetic `annotate`, frame | **0.801** | **0.608** | **0.587** | **0.560** (0.483) | **0.616** | 0.33 / 0.46 | **0.651** | 5.9 |
 | Hessian baseline, frame | 0.653 | 0.541 | 0.462 | 0.424 (0.503) | 0.379 | 0.06 / 0.33 | 0.552 | 1.2 |
 | vesselmap (LIMBUS), frame * | 0.715 | 0.600 | – | 0.323 | – | 0.40 / 0.25 | 0.617 | 442 |
 
@@ -33,11 +33,20 @@ frame:
 balanced scores existed. Its crossing precision and edge cover were computed slightly differently.
 
 Two numbers stand out:
-- **Crossings.** The Hessian finds 6 % of the crossings; the orientation score finds 31-36 %. In the score,
+- **Crossings.** The Hessian finds 6 % of the crossings; the orientation score finds 33-38 %. In the score,
   a crossing's two vessels live in different orientation layers, so neither breaks the other.
-- **Coarse typing.** The annotator types junctions above the image's majority-label reference (0.545
-  against 0.530 on averages, 0.515 against 0.459 on frames). Its balanced accuracy is 0.58-0.59, against
-  0.33 for a constant label. The Hessian baseline stays below the majority reference.
+- **Coarse typing: competent by balanced accuracy, but beating the majority label depends on a dev-fitted
+  prior.**
+  - Balanced accuracy (mean per-class recall; a constant label scores 0.33) is 0.58 on averages and 0.62 on
+    frames. Without the compound-radius prior it is 0.51 / 0.56.
+  - Plain coarse accuracy beats the image's majority-label reference only because of the `compound_r = 16`
+    prior (stage 7), which was tuned on the same dev truth. With the prior, it is 0.549 against 0.522 on
+    averages and 0.560 against 0.483 on frames. The margin on averages is about the noise level.
+  - With the prior switched off (`compound_r = ∞`, same proposals), it is 0.405 and 0.437: below the
+    reference on both kinds.
+  - Even with the prior, it is below the reference on 2 of 6 images: both pathologic stills, 0.469 against
+    0.594 and 0.545 against 0.727. Before the review fixes it was 3 of 6, healthy_s004 average included.
+  - The Hessian baseline stays below the majority reference.
 
 **Which ideas did the work.**
 - **Most of the gain comes from the V1 stage and the readout.**
@@ -46,11 +55,15 @@ Two numbers stand out:
   - Phase gating by the odd partner (no echoes along vein walls).
   - Tracing along the tangent in SE(2), so a line runs straight through a crossing in its own layer.
   - End-stopping (graph) logic built on that.
-- **Contour integration and the surround buy robustness to noise, not peak quality.** With both switched off
-  (`annotate_v1_only`), the averaged stills score as well or better: composite 0.708 against 0.680. But the
-  single frames collapse: centreline precision drops from 0.945 to 0.683, and the composite from 0.656 to
-  0.602. Only the variants that keep both contextual stages (`annotate`, and stages 1-7) are good on both
-  kinds. With each variant at its own best threshold, all four lie within 0.01 on dev (see Ablations).
+- **Contour integration and the surround buy robustness to noise, not peak quality.**
+  - With both switched off (`annotate_v1_only`), the averaged stills score better: composite 0.700 against
+    0.671.
+  - But the single frames collapse: centreline precision drops from 0.950 to 0.691, and the composite from
+    0.664 to 0.594.
+  - The association field is the stage that matters for frames. Without it, frame precision is 0.875 and
+    the composite 0.634. Without the surround, the composite is 0.662, as good as the full annotator.
+  - With each variant at its own best threshold, all four lay within 0.01 on dev (see Ablations; measured
+    before the review fixes).
 - **The diffusion-model lesson helped least.**
   - Rendering in OD and pruning by MDL are about neutral overall: they raise balanced typing and lower
     recall slightly.
@@ -84,6 +97,39 @@ maths, and all parameters are fields of the frozen `Config`.
 - **Why the 60 px envelope.** The first version used a 28 px closing radius. It filled the 80 px vessel of
   the pathologic scene into the background (B contained the vessel, and OD showed only a faint ghost of it).
   The envelope disc must be wider than the widest half lumen.
+- **Known defect: B is partly fitted on faint vessels** (found in review, not fixed). The mask
+  `Z > 2 or S > 3 RMS` misses many observable vessels, so their pixels count as background, and B is pulled
+  towards them. Their OD is attenuated. An audit against the truth (truth used only for the audit) found:
+  - Share of the truth's centreline px in the pixels B is fitted on: 0.12 / 0.05 for healthy_s000
+    (average / frame), 0.28 / 0.21 for healthy_s004 and 0.32 / 0.26 for pathologic_s000.
+  - Share of those background pixels lying within ±3 px of a truth vessel: 0.04-0.21.
+  - At those centreline px, the median OD is 0.56-0.70 of the OD from a refit that also leaves out the
+    truth lumens. Example: 0.0174 against 0.0298 on healthy_s004 average.
+  - This is one cause of the faint-line recall problem and of my band CNR being about 0.23 of the truth's
+    (stage 8, Open problems). The vessel pixels also enter the background RMS that every CNR is divided by.
+- **The fix I tried, `bg_trace_k`** (a Config option, off). Stage 6 feeds stage 1 back once: the traced
+  lumens (±k × the readout width) join the vesselness mask, B is refitted, and stages 3-6 run again.
+  - It removes most of the leak. At k = 0.5, the share of truth centreline px in the fit set falls from
+    0.24 to 0.08 on averages and from 0.17 to 0.07 on frames. Faint vessels that are not traced still leak.
+  - It did not raise the dev scores, and it costs about 4 s more per image. Composite = mean of centreline F1,
+    strict junction F1, balanced coarse type accuracy and edge cover; average / frame:
+
+    | variant | t_high / t_low | composite | clR | clP | balanced coarse type |
+    |---|---|---|---|---|---|
+    | off (final) | 3.0 / 1.5 | 0.671 / 0.664 | 0.706 / 0.701 | 0.948 / 0.950 | 0.581 / 0.616 |
+    | k = 0.5 * | 3.0 / 1.5 | 0.684 / 0.643 | 0.724 / 0.720 | 0.926 / 0.898 | 0.574 / 0.505 |
+    | k = 1.0 * | 3.0 / 1.5 | 0.665 / 0.622 | 0.757 / 0.767 | 0.867 / 0.802 | 0.520 / 0.477 |
+    | k = 0.5 | 3.5 / 1.7 | 0.653 / 0.645 | 0.685 / 0.683 | 0.937 / 0.919 | 0.539 / 0.581 |
+    | k = 1.0 | 3.5 / 1.7 | 0.681 / 0.632 | 0.742 / 0.730 | 0.905 / 0.867 | 0.588 / 0.512 |
+    | k = 0.5, lumens left out of the B fit only | 3.0 / 1.5 | 0.667 / 0.648 | 0.714 / 0.704 | 0.944 / 0.938 | 0.555 / 0.558 |
+    | k = 1.0, lumens left out of the B fit only | 3.0 / 1.5 | 0.676 / 0.651 | 0.690 / 0.675 | 0.933 / 0.913 | 0.629 / 0.630 |
+
+    \* measured before the stage 7 review fixes (log 26). For comparison, the final row before those fixes
+    was 0.680 / 0.656.
+  - Recall rises, but precision falls, most on frames. A smaller background RMS raises every CNR, which
+    acts like lower thresholds. Raising the thresholds to restore precision loses the recall again. When the lumens leave only the B
+    fit and the noise pixels stay, the recall gain mostly vanishes. The attenuation is real, but on dev,
+    correcting it does not improve the annotation.
 
 ### 2. OFF-centre ganglion cells with contrast gain control: `ganglion_cells`
 
@@ -94,7 +140,9 @@ maths, and all parameters are fields of the frozen `Config`.
     the same band over the background pixels. The RMS is the Winsorised (at 3× the global robust RMS)
     masked normalised convolution of `D_s²`.
   - `Z = max_s D_s / RMS_s`. This is the band-matched CNR the truth uses to decide what is observable.
-- **Used for.** The mask iterations of stage 1, and the visibility floor of stage 8 (the RMS maps).
+- **Used for.** The mask iterations of stage 1 (Z), and the visibility floor of stage 8 (the RMS maps). It is
+  a side branch: V1 (stage 3) does not read Z. It filters stage 1's OD itself and normalises its own
+  responses by their local RMS.
 
 ### 3. V1 simple cells: `simple_cells`
 
@@ -125,10 +173,10 @@ maths, and all parameters are fields of the frozen `Config`.
 
 ### 4. Non-classical surround: `surround`
 
-- **Biology.** Cross-orientation normalisation by the pooled activity of all orientations at the location,
-  and iso-orientation surround suppression. A contour on an empty background is salient; inside texture it
-  is not.
-- **Maths.**
+- **Biology.** Cross-orientation suppression by the pooled activity of all orientations at the location (in
+  cortex largely divisive normalisation), and iso-orientation surround suppression. A contour on an empty
+  background is salient; inside texture it is not.
+- **Maths.** Both suppressions are **subtractive** here. DESIGN's divisive normalisation was not implemented.
   - `iso` = the mean of the lower half of the orientation tuning `max(U, 0)` over theta. For a line it is
     about 0.04 of the peak, for a blob about the peak. The update is `U1 = U - 1.0 iso`, so several
     orientation peaks per pixel (crossings) survive.
@@ -191,6 +239,11 @@ maths, and all parameters are fields of the frozen `Config`.
     `4 + (w_thin,a + w_thin,b)/2`, the size of their lumen overlaps. Two events on one trace join when closer
     than `4 + (w_cross,a + w_cross,b)/2`: a thin vessel crossing two adjacent veins is one compound.
     Distances above 2 lambda never join.
+  - **Where an event sits.** An X sits at the intersection. A T sits where the end's own line (its outward
+    direction) meets the other centreline, if that is within the attachment reach (6 px plus half the other
+    width); otherwise it sits at the nearest point of the other centreline. With the nearest point, the two
+    halves of an oblique crossing broken at a wide vessel landed `w / tan(angle)` apart along it and were
+    emitted as two pseudo-Ts (review fix, log 26).
   - **Arms** are the participating traces' stretches leaving the junction disc that are at least 6 px long.
   - **Types.**
     - 3 arms: 'pseudo-T'. This is the commonest 3-way type in the dev truth (92 against 12 forks); a still
@@ -202,7 +255,10 @@ maths, and all parameters are fields of the frozen `Config`.
       regions gather lines too faint to trace; it raised plain and balanced coarse accuracy.
   - **Splitting.** T-ends are extended to their attachment point when the gap is ≤ 12 px and outside the
     other lumen. Every trace is cut at its point nearest each of its junctions (where the truth's edges end),
-    so polylines run junction to junction.
+    so polylines run junction to junction. A free piece (one end at a junction) is kept only if its stretch
+    beyond the junction disc is at least `arm_min`. This is the same test that counts an arm, so a junction's
+    edges are its arms. Before the review fix, the test measured from the cut at the centre, and stubs lying
+    mostly inside the disc were output: some 'pseudo-T' junctions had 4 or more edges.
 
 ### 8. Iterative refinement, the diffusion-model lesson: `refine`
 
@@ -227,73 +283,88 @@ maths, and all parameters are fields of the frozen `Config`.
       edge; its amplitude is re-fitted against what the others leave (explaining away). Junction discs
       (0.7 R) carry no weight, and sigma² is the local RMS² of the high-passed OD over background pixels.
     - The band CNR of its OD profile against stage 2's band RMS along it must reach 0.5. On my scale this is
-      about the truth's CNR 2, since my edge CNR is about 0.23 of the truth's.
+      about the truth's CNR 2, since my edge CNR is about 0.23 of the truth's. Part of that factor is the
+      stage 1 background leak: attenuated faint OD and vessel pixels in the RMS.
     - Edges are removed greedily, weakest first; the gains of overlapping edges are updated, and the removed
       ranges are cut out of their traces.
   - **Re-proposal**, optional (`repropose`; `annotate_repropose`). Stages 3-6 run again on
     `max(residual, 0)` outside the junction discs, at 1.3× the thresholds. A new trace is kept if it runs at
     least 20 px outside the lumens already rendered and is not a duplicate or wall echo of the graph's
-    vessels. New edges pay 20× the description cost in the next prune.
+    vessels. New edges pay 20× the description cost in the next prune. The re-proposed flag is carried per
+    point, so it survives a gap join with an older trace. Before the review fix, a join dropped it and the
+    joined trace escaped the 20× cost.
 - **After the last round.** The graph is assembled again. The **knot cue** (mean residual at each junction
   centre over the thinner arm's contrast) is stored on each junction but not used (see What failed).
-- **Final setting.** One fixed round of render, prune and re-assemble, without re-proposal. Every
-  re-proposal setting lowered the dev scores (log 20, 25). DESIGN's 2-3 rounds were tried, and two rounds
-  were worse than one.
+- **Final setting.** Two fixed rounds of render, prune and re-assemble (`rounds = 2`), without re-proposal.
+  - The second round prunes the free-end edges that the first round's removals expose once the graph is
+    re-assembled. On healthy_s004 average, round 1 removes 9 edges (284 px), round 2 removes 1 (23 px), and
+    a third round removes nothing (before the stage 7 review fixes: 15 edges / 338 px, then 2 / 81 px).
+  - Until the review, the code looped `rounds + 1` times, so this setting was mislabelled 'one round'. The
+    loop now runs `rounds` times and the default is 2: the output is unchanged.
+  - With re-proposal (`annotate_repropose`), the re-proposal runs between the two rounds.
+  - Every re-proposal setting lowered the dev scores (log 20, 25). DESIGN's 2-3 rounds were tried as
+    re-proposal rounds, and two re-proposal rounds were worse than one.
 
 ## Final parameters (`Config`)
 
 | stage | parameters |
 |---|---|
-| 1 | env_radius 60, bg_sigma 8, bg_iters 2, mask_z 2, mask_dilate 2, saturation 4095 |
+| 1 | env_radius 60, bg_sigma 8, bg_iters 2, mask_z 2, mask_dilate 2, saturation 4095, bg_trace_k 0 (off) |
 | 2 | bands 1, 2, 4, 8, 16, 32; rms_sigma 24 |
 | 3 | 16 orientations; scales 1.5, 2.1, 3, 4.2, 6, 8.5, 12, 17, 24; channels (0-2), (3-4), (5-8); grid factors 1, 2, 4; elong 3, 2.5, 2; odd_alpha 0.7 |
 | 4 | cross_k 1.0, flank_k 0.3 |
 | 5 | assoc_len 8, assoc_steps 3, assoc_gain 1, assoc_fill off |
 | 6 | t_high 3.0, t_low 1.5, min_len 10, border 3, look 3, pass 4, claim_k 0.5, merge bins ±1 / 0 |
 | 7 | gap_att 6, cone 45°, ext_max 12, gap_join 14, join_turn 40°, r0 4, link_k 1, share_k 1, arm_min 6, cross_turn 40°, compound_r 16, OD widths |
-| 8 | rounds 1, repropose off (re_k 1.3, re_mdl 20, re_novel 2 when on), jmask_k 0.7, corr_px 6, mdl_k 2, mdl_len 20, cnr_min 0.5 |
+| 8 | rounds 2 (render / prune passes), repropose off (between the passes when on: re_k 1.3, re_mdl 20, re_novel 2), jmask_k 0.7, corr_px 6, mdl_k 2, mdl_len 20, cnr_min 0.5 |
 
 ## Dev results and ablations
 
 All runs used `python -m experiments.neuromimetic.harness --annotator experiments.neuromimetic.neuromimetic:<fn>
---scenes <3 dev scenes> --kinds average frame --repeat 2` (the current harness). Every run reported
-`deterministic = True`. Each row is the mean of the 3 dev scenes.
+--scenes <3 dev scenes> --kinds average frame --repeat 2` (the current harness). They were re-run after the
+review fixes (log 26). Every run reported `deterministic = True`. Each row is the mean of the 3 dev scenes.
 - "comp." is my summary, the mean of centreline F1, strict junction F1, balanced coarse type accuracy and
   edge cover.
 - "maj." is the majority-label reference for coarse typing.
 - Times are the faster of the two runs, on 2 threads of a loaded shared machine.
+- The Hessian rows are from the earlier run; `baseline_hessian` did not change.
 
 | annotator | kind | clR | clP | clF | jR | jP | jF | jF strict | coarse type (maj.) | coarse bal. | exact type | xR | xP | cover | pcs/edge | s | comp. |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `annotate` (1-8) | average | 0.710 | 0.948 | 0.807 | 0.616 | 0.852 | 0.714 | 0.667 | 0.545 (0.530) | 0.594 | 0.507 | 0.357 | 0.554 | 0.654 | 1.10 | 6.9 | 0.680 |
-| | frame | 0.704 | 0.945 | 0.801 | 0.501 | 0.834 | 0.616 | 0.594 | 0.515 (0.459) | 0.575 | 0.466 | 0.306 | 0.463 | 0.653 | 1.09 | 6.5 | 0.656 |
-| `annotate_no_verify` (1-7) | average | 0.736 | 0.942 | 0.821 | 0.636 | 0.831 | 0.719 | 0.666 | 0.518 (0.511) | 0.551 | 0.490 | 0.411 | 0.551 | 0.669 | 1.12 | 4.5 | 0.677 |
-| | frame | 0.720 | 0.933 | 0.807 | 0.543 | 0.822 | 0.647 | 0.627 | 0.527 (0.449) | 0.560 | 0.484 | 0.319 | 0.406 | 0.658 | 1.12 | 4.4 | 0.663 |
-| `annotate_no_association` | average | 0.724 | 0.932 | 0.810 | 0.669 | 0.840 | 0.742 | 0.681 | 0.572 (0.515) | 0.612 | 0.541 | 0.367 | 0.559 | 0.666 | 1.13 | 6.0 | 0.692 |
-| | frame | 0.732 | 0.874 | 0.791 | 0.640 | 0.764 | 0.687 | 0.636 | 0.479 (0.497) | 0.513 | 0.438 | 0.306 | 0.432 | 0.648 | 1.14 | 6.6 | 0.647 |
-| `annotate_no_surround` | average | 0.710 | 0.946 | 0.805 | 0.643 | 0.852 | 0.732 | 0.696 | 0.490 (0.518) | 0.536 | 0.457 | 0.340 | 0.487 | 0.653 | 1.10 | 6.1 | 0.672 |
-| | frame | 0.728 | 0.926 | 0.809 | 0.540 | 0.830 | 0.638 | 0.607 | 0.471 (0.478) | 0.504 | 0.446 | 0.306 | 0.382 | 0.667 | 1.10 | 6.1 | 0.647 |
-| `annotate_v1_only` (1-3, 6-7) | average | 0.772 | 0.902 | 0.827 | 0.728 | 0.821 | 0.771 | 0.723 | 0.586 (0.498) | 0.584 | 0.555 | 0.408 | 0.544 | 0.698 | 1.14 | 3.8 | 0.708 |
-| | frame | 0.788 | 0.683 | 0.722 | 0.780 | 0.465 | 0.554 | 0.542 | 0.483 (0.439) | 0.497 | 0.446 | 0.278 | 0.288 | 0.648 | 1.24 | 4.5 | 0.602 |
-| `annotate_repropose` (8 with re-proposal) | average | 0.747 | 0.819 | 0.777 | 0.757 | 0.520 | 0.615 | 0.557 | 0.484 (0.510) | 0.516 | 0.446 | 0.349 | 0.407 | 0.594 | 1.28 | 13.9 | 0.611 |
-| | frame | 0.744 | 0.882 | 0.801 | 0.613 | 0.634 | 0.613 | 0.572 | 0.423 (0.486) | 0.460 | 0.379 | 0.264 | 0.355 | 0.641 | 1.17 | 11.2 | 0.619 |
+| `annotate` (1-8) | average | 0.706 | 0.948 | 0.805 | 0.601 | 0.822 | 0.694 | 0.651 | 0.549 (0.522) | 0.581 | 0.510 | 0.375 | 0.573 | 0.649 | 1.11 | 6.5 | 0.671 |
+| | frame | 0.701 | 0.950 | 0.801 | 0.505 | 0.807 | 0.608 | 0.587 | 0.560 (0.483) | 0.616 | 0.505 | 0.333 | 0.462 | 0.651 | 1.10 | 5.9 | 0.664 |
+| `annotate_no_verify` (1-7) | average | 0.728 | 0.946 | 0.818 | 0.621 | 0.804 | 0.700 | 0.651 | 0.534 (0.514) | 0.561 | 0.506 | 0.429 | 0.553 | 0.663 | 1.12 | 4.3 | 0.673 |
+| | frame | 0.715 | 0.940 | 0.807 | 0.538 | 0.782 | 0.629 | 0.602 | 0.523 (0.468) | 0.560 | 0.487 | 0.333 | 0.412 | 0.653 | 1.12 | 4.1 | 0.655 |
+| `annotate_no_association` | average | 0.723 | 0.935 | 0.810 | 0.674 | 0.808 | 0.734 | 0.687 | 0.607 (0.506) | 0.643 | 0.559 | 0.359 | 0.572 | 0.663 | 1.14 | 6.1 | 0.701 |
+| | frame | 0.733 | 0.875 | 0.792 | 0.641 | 0.731 | 0.670 | 0.615 | 0.437 (0.493) | 0.481 | 0.402 | 0.292 | 0.403 | 0.648 | 1.14 | 6.4 | 0.634 |
+| `annotate_no_surround` | average | 0.707 | 0.947 | 0.804 | 0.625 | 0.817 | 0.707 | 0.681 | 0.541 (0.536) | 0.570 | 0.512 | 0.350 | 0.482 | 0.650 | 1.10 | 5.7 | 0.676 |
+| | frame | 0.728 | 0.928 | 0.810 | 0.551 | 0.809 | 0.636 | 0.596 | 0.526 (0.491) | 0.578 | 0.486 | 0.306 | 0.386 | 0.666 | 1.11 | 5.9 | 0.662 |
+| `annotate_v1_only` (1-3, 6-7) | average | 0.762 | 0.908 | 0.823 | 0.736 | 0.801 | 0.767 | 0.715 | 0.580 (0.499) | 0.571 | 0.556 | 0.408 | 0.560 | 0.692 | 1.14 | 3.6 | 0.700 |
+| | frame | 0.778 | 0.691 | 0.723 | 0.783 | 0.468 | 0.552 | 0.528 | 0.487 (0.452) | 0.485 | 0.457 | 0.306 | 0.311 | 0.640 | 1.22 | 4.3 | 0.594 |
+| `annotate_repropose` (8 with re-proposal) | average | 0.744 | 0.826 | 0.779 | 0.761 | 0.541 | 0.631 | 0.579 | 0.513 (0.513) | 0.540 | 0.479 | 0.324 | 0.445 | 0.600 | 1.27 | 13.3 | 0.624 |
+| | frame | 0.743 | 0.891 | 0.805 | 0.654 | 0.627 | 0.630 | 0.590 | 0.473 (0.480) | 0.514 | 0.425 | 0.347 | 0.375 | 0.636 | 1.18 | 10.9 | 0.636 |
 | `baseline_hessian` | average | 0.584 | 0.815 | 0.678 | 0.432 | 0.774 | 0.539 | 0.487 | 0.375 (0.595) | 0.393 | 0.352 | 0.062 | 0.241 | 0.528 | 1.15 | 0.8 | 0.521 |
 | | frame | 0.655 | 0.665 | 0.653 | 0.524 | 0.618 | 0.541 | 0.462 | 0.424 (0.503) | 0.379 | 0.424 | 0.056 | 0.333 | 0.552 | 1.26 | 1.2 | 0.512 |
+
+Before the review fixes, the composite was 0.680 / 0.656 for `annotate` (average / frame), 0.677 / 0.663 for
+stages 1-7, 0.692 / 0.647 without association, 0.672 / 0.647 without surround, 0.708 / 0.602 for V1 only and
+0.611 / 0.619 with re-proposal.
 
 **Full annotator per scene**:
 
 | scene | kind | clR | clP | clF | jF strict | coarse type (maj.) | coarse bal. | xR / xP | cover | s |
 |---|---|---|---|---|---|---|---|---|---|---|
-| healthy_s000_480x768 | average | 0.879 | 0.968 | 0.921 | 0.783 | 0.600 (0.413) | 0.630 | 0.43 / 0.71 | 0.806 | 9.8 |
-| healthy_s000_480x768 | frame | 0.861 | 0.957 | 0.907 | 0.731 | 0.604 (0.226) | 0.620 | 0.58 / 0.78 | 0.791 | 8.3 |
-| healthy_s004_320x512 | average | 0.688 | 0.966 | 0.804 | 0.738 | 0.474 (0.553) | 0.547 | 0.33 / 0.50 | 0.634 | 3.7 |
-| healthy_s004_320x512 | frame | 0.709 | 0.958 | 0.815 | 0.627 | 0.531 (0.469) | 0.628 | 0.21 / 0.50 | 0.659 | 3.6 |
-| pathologic_s000_480x768 | average | 0.563 | 0.910 | 0.695 | 0.481 | 0.562 (0.625) | 0.605 | 0.31 / 0.46 | 0.522 | 7.4 |
-| pathologic_s000_480x768 | frame | 0.541 | 0.920 | 0.681 | 0.422 | 0.409 (0.682) | 0.478 | 0.13 / 0.11 | 0.509 | 7.7 |
+| healthy_s000_480x768 | average | 0.871 | 0.970 | 0.918 | 0.749 | 0.611 (0.431) | 0.640 | 0.43 / 0.68 | 0.802 | 8.7 |
+| healthy_s000_480x768 | frame | 0.856 | 0.963 | 0.906 | 0.733 | 0.618 (0.236) | 0.632 | 0.63 / 0.71 | 0.788 | 7.8 |
+| healthy_s004_320x512 | average | 0.688 | 0.967 | 0.804 | 0.718 | 0.568 (0.541) | 0.613 | 0.39 / 0.54 | 0.637 | 4.1 |
+| healthy_s004_320x512 | frame | 0.707 | 0.960 | 0.814 | 0.614 | 0.516 (0.484) | 0.633 | 0.25 / 0.55 | 0.658 | 3.4 |
+| pathologic_s000_480x768 | average | 0.560 | 0.906 | 0.692 | 0.486 | 0.469 (0.594) | 0.490 | 0.31 / 0.50 | 0.508 | 6.7 |
+| pathologic_s000_480x768 | frame | 0.541 | 0.926 | 0.683 | 0.413 | 0.545 (0.727) | 0.583 | 0.13 / 0.13 | 0.506 | 6.4 |
 
 ### Ablations at each variant's own best thresholds
 
-The ablations above share the thresholds of the full annotator. But the surround and the association field
+This sweep was run before the review fixes (log 26), and was not repeated after them. The ablations above
+share the thresholds of the full annotator. But the surround and the association field
 lower C, so at shared thresholds an ablation also moves the operating point. To separate the two effects,
 each variant was swept over `(t_high, t_low)` with stage 8 off: 2.0/1.0, 2.5/1.3, 3.0/1.5, 3.5/1.7,
 4.0/2.0, 4.5/2.2, 5.0/2.5 and 6.0/3.0. The composite is the mean over all 6 images.
@@ -310,16 +381,17 @@ What the ablations say:
 - **At their own best, the four variants are within 0.01 on dev.** At matched recall (about 0.72), the
   contextual stages give the higher precision: clF 0.814 against 0.803 for V1-only at 4.0/2.0, strict jF
   0.646 against 0.633.
-- **What the contextual stages really change is robustness.** V1-only is the best variant on averaged
-  stills and the worst on single frames. Its frame precision is 0.68: noise lumps pass a threshold tuned
-  for averages. The full pipeline holds a precision of about 0.945 on both kinds at one threshold.
-- **Stage 8 (pruning) against stages 1-7.**
-  - Balanced coarse typing is +0.04 on averages and +0.015 on frames.
-  - Centreline recall is −0.02 to −0.03, and edge cover −0.01.
-  - Strict junction F1 is unchanged on averages and −0.03 on frames.
-  - Overall composite: 0.668 against 0.670, which is neutral.
-- **Re-proposal (`annotate_repropose`)** adds junctions faster than true lines (junction precision 0.85 →
-  0.52 on averages), and costs typing.
+- **What the contextual stages really change is robustness.** V1-only is among the best variants on averaged
+  stills and the worst on single frames. Its frame precision is 0.69: noise lumps pass a threshold tuned
+  for averages. The full pipeline holds a precision of about 0.95 on both kinds at one threshold. Without
+  the association field, frame precision is 0.875.
+- **Stage 8 (pruning) against stages 1-7, after the review fixes.**
+  - Balanced coarse typing is +0.02 on averages and +0.06 on frames.
+  - Centreline recall is −0.02 / −0.01, and edge cover −0.01 / 0.00.
+  - Strict junction F1 is unchanged on averages and −0.015 on frames.
+  - Overall composite: 0.671 / 0.664 against 0.673 / 0.655, which is neutral.
+- **Re-proposal (`annotate_repropose`)** adds junctions faster than true lines (junction precision 0.82 →
+  0.54 on averages), and costs typing.
 
 ## Development log (what each change did)
 
@@ -364,7 +436,8 @@ images available at the time (4 images until log 7, then 6).
     good edges it pruned. Prune-only became neutral.
 19. **Knot cue** (residual at the junction centre over a_min): medians −2.4 at truth crossings, −1.8 at
     compounds, −1.4 at 3-ways. The render over-predicts every junction, so the cue does not type. Not used.
-20. **Re-proposal at 3.5/1.7**: 1 round composite 0.644-0.649, 2 rounds 0.629-0.642, against 0.651 without.
+20. **Re-proposal at 3.5/1.7**: one re-proposal round composite 0.644-0.649, two re-proposal rounds
+    0.629-0.642, against 0.651 without.
     A 20× cost on re-proposed edges barely changed this.
 21. **Lower thresholds with the full loop** (3.2/1.5): worse then. Grid factors (1, 1, 2) were no better than
     (1, 2, 4).
@@ -378,6 +451,29 @@ images available at the time (4 images until log 7, then 6).
 25. **At 3.0/1.5**: stages 1-7 0.670, plus prune 0.671 (balanced typing 0.591), plus re-proposal (re_k 1.3 /
     1.5 / 2.0 / 2.5) 0.615 / 0.634 / 0.652 / 0.649. **Final**: 3.0/1.5 with render and prune, no
     re-proposal.
+26. **Review fixes** (after the first final run). Composite, average / frame, same scorer:
+    - **Before:** 0.680 / 0.656.
+    - **Stage 7, `_split`:** a free piece is kept only if it reaches `arm_min` beyond the junction disc, the
+      arm test. Composite 0.675 / 0.662.
+      - Junctions whose edge count differs from their arm count: 36 → 26 over the 6 images.
+      - 'pseudo-T' junctions with 4 or more edge ends: 15 → 6.
+      - The remaining mismatches I inspected are short pieces between two nearby junctions.
+    - **Stage 7, T events at the end's ray hit:** composite 0.671 / 0.664.
+      - Anti-collinear pseudo-T pairs on one trace within 2 lambda (split crossings): 5 → 2. On
+        healthy_s004 average, the truth crossing at (185, 135) is now one 'crossing', 2.5 px off, instead of
+        two pseudo-Ts 13.6 px apart.
+      - Matched junctions lie closer to the truth on the healthy averages: median 2.8 → 2.4 px and
+        3.7 → 2.6 px.
+      - Some T events now merge, so junction F1 falls by 0.01-0.02.
+    - **Both stage 7 fixes together:**
+      - Junction F1: 0.714 / 0.616 → 0.694 / 0.608.
+      - Coarse typing: 0.545 / 0.515 → 0.549 / 0.560 (balanced 0.594 / 0.575 → 0.581 / 0.616).
+      - All of this is within the noise of six images.
+    - **Stage 8:**
+      - `rounds` now counts the render/prune passes (2). Before, the loop ran `rounds + 1` times; the output
+        is unchanged.
+      - The re-proposed flag is carried per point through gap joins (`annotate_repropose` only).
+    - **Stage 1:** the background leak was measured, and `bg_trace_k` was tried and not adopted (stage 1).
 
 ## What failed
 
@@ -394,7 +490,7 @@ images available at the time (4 images until log 7, then 6).
   - A CNR floor on the truth's scale (2) removed a third of the true lines.
 - **Re-proposal from the residual**, at every threshold and cost tried. Near rendered vessels the positive
   residual is dominated by model misfit (profile shape, centreline offsets, junction knots), not by missed
-  vessels. The new traces mostly add false T arms: junction precision 0.85 → 0.52.
+  vessels. The new traces mostly add false T arms: junction precision 0.82 → 0.54.
 - **The knot cue.** In principle a crossing shows an additive dark knot and a fork a union. On dev the
   residual at junction centres is dominated by render error, because the additive render over-predicts
   every junction by about twice the thinner vessel's contrast. It does not separate the types.
@@ -409,6 +505,10 @@ images available at the time (4 images until log 7, then 6).
 
 - **Faint lines.**
   - Truth-CNR 3-7 vessels are the bulk of the missed centreline. My band CNR is about 0.23 of the truth's.
+  - One cause is the background leak of stage 1. Faint vessels missed by the mask enter the B fit, so their
+    OD comes out at 0.56-0.70 of a leak-free refit, and they also enter the background RMS. Removing the leak
+    for the traced vessels (`bg_trace_k`) did not raise the dev scores (stage 1). The untraced faint
+    vessels, the ones that matter for recall, would need a better vesselness mask.
   - A texture "web" in the orientation score (99th percentile of background C about 5) sets the working
     threshold: in truth terms it is roughly CNR 5-7.
   - The truth also counts thin vessels lying on a 60-100 px vessel by their own contrast. Most of these are
@@ -419,8 +519,10 @@ images available at the time (4 images until log 7, then 6).
 - **Typing is detection-limited.**
   - Most truth compounds have 5-6 lines and I trace 3-4 of them; most truth crossings typed 3-way are
     missing their fourth arm.
-  - The radius prior is a crutch, tuned on six images. Coarse typing is above the majority reference on
-    average, but below it on the pathologic scene, where compounds are 62-68 % of junctions.
+  - The radius prior is a crutch, tuned on six images, and the majority-label margin rests on it. Without it,
+    coarse typing is below the majority reference in the mean of both kinds (0.405 / 0.437 against
+    0.522 / 0.483). With it, typing is still below the reference on 2 of 6 images: both pathologic stills,
+    where compounds are 59-73 % of the matched junctions.
 - **A junction-aware render.** The additive tube render is right for a crossing at different depths and
   wrong for a fork (a union). A proper version would render both hypotheses per junction (sum against
   union, with depth attenuation) and compare their residuals. That would make the knot cue usable as a

@@ -42,8 +42,6 @@ from scipy import ndimage as ndi
 
 cv2.setNumThreads(2)
 FFT_WORKERS = 2
-_FIT_ONLY = False
-_RAY = True
 LAMBDA_PX = 11.9                        # vesselscene's lambda (truth.LAMBDA_PX): the length scale of a junction
 
 
@@ -56,7 +54,7 @@ class Config:
     bg_iters: int = 2
     mask_z: float = 2.0                 # band CNR above which a pixel is vessel (mask for the background)
     mask_dilate: int = 2                # px
-    bg_trace_k: float = 0.0             # >0: the traced lumens (+- bg_trace_k w) join the mask, B refitted, 3-6 rerun
+    bg_trace_k: float = 0.0             # > 0: traced lumens (+-k w) join the mask, stages 1, 3-6 rerun (NOTES)
     # 2. ganglion cells
     bands: tuple = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0)
     rms_sigma: float = 24.0             # px, window of the local contrast (RMS) estimate
@@ -202,6 +200,9 @@ def photoreceptors(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT,
     outside M (its negative) by masked normalised convolution, G*(L w) / G*w with w = valid & ~M, holes filled
     from coarser scales. The target is OD = B - L in nepers, vessels positive (Beer-Lambert: overlapping
     vessels add their densities); invalid pixels take the nearest valid OD (and carry no weight later).
+    The mask misses faint vessels (band CNR <= mask_z), so B is partly fitted on them and their OD is
+    attenuated (NOTES, stage 1). extra, a bool map, is added to the mask in every iteration: propose passes the
+    traced lumens of a first readout when cfg.bg_trace_k > 0 (it did not raise the dev scores; off by default).
     Returns dict(OD, B, L, ok (valid data), bg (background pixels), mask)."""
     I = np.asarray(image, np.float32)
     ok = np.asarray(valid, bool) & np.isfinite(I) & (I > 0) & (I < cfg.saturation)
@@ -215,7 +216,7 @@ def photoreceptors(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT,
     S = _gblur(OD, 1.0)
     m = float(np.median(S[ok]))
     bg = ok & (S < m + 2.0 * _robust_rms(S - m, ok))
-    if extra is not None and not _FIT_ONLY:
+    if extra is not None:
         bg &= ~extra
     mask = ~bg
     for _ in range(cfg.bg_iters):
@@ -223,13 +224,13 @@ def photoreceptors(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT,
         S = _gblur(OD, 1.0)
         sr = _local_rms(S - np.median(S[bg]), bg, cfg.rms_sigma * 2)
         mask = (Z > cfg.mask_z) | (S > 3.0 * sr)
-        if extra is not None and not _FIT_ONLY:
+        if extra is not None:
             mask |= extra
         if cfg.mask_dilate:
             k = 2 * cfg.mask_dilate + 1
             mask = cv2.dilate(mask.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) > 0
         bg = ok & ~mask
-        B = _masked_mean(L, bg if extra is None else bg & ~extra, cfg.bg_sigma)
+        B = _masked_mean(L, bg, cfg.bg_sigma)
         OD = B - L
     OD = np.where(ok, OD, 0.0).astype(np.float32)
     if not ok.all():                                  # filters see the nearest valid OD, not a step to 0
@@ -824,7 +825,8 @@ def _concat(A: dict, B: dict) -> dict:
 
 
 def _events(traces: list, cfg: Config) -> list:
-    """Where a trace ends on another one (T: end-stopping) or two traces cross (X). Each event: dict(p, tr
+    """Where a trace ends on another one (T: end-stopping; at the hit of the end's ray on the other
+    centreline, _ray_hit, else its nearest point) or two traces cross (X). Each event: dict(p, tr
     (trace ids), wide / thin (the wider and the thinner vessel's width there), kind, att ((trace, end,
     attachment point) for a T))."""
     from scipy.spatial import cKDTree
@@ -867,7 +869,7 @@ def _events(traces: list, cfg: Config) -> list:
             # where the end's own line meets the other centreline (within the attachment reach), else the
             # nearest point: the two halves of an oblique crossing broken at a wide vessel then meet at one
             # point instead of their feet w / tan(angle) apart
-            hit = _ray_hit(p, d, traces[j]["xy"], m, cfg.gap_att + wall[q] / 2) if _RAY else None
+            hit = _ray_hit(p, d, traces[j]["xy"], m, cfg.gap_att + wall[q] / 2)
             foot = pts[q].copy() if hit is None else hit
             pos = 0.5 * (p + pts[q]) if end_end else foot
             # a short gap outside the other lumen is closed by extending the end to the other centreline;
@@ -1004,7 +1006,8 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
     are seen as crossing (X).
     Maths: collinear end-to-end gaps are first bridged (mutual best pairs, turn < join_turn_deg). Events: an
     end lying within gap_att + w/2 of another trace, in a cone of att_cone_deg ahead of the end or inside its
-    lumen (T), and the intersections of two traces (X). Events form one junction by complete linkage
+    lumen (T, placed where the end's own line meets the other centreline within that reach, else at the
+    nearest point), and the intersections of two traces (X). Events form one junction by complete linkage
     (_cluster_events: closer than r0 + link_k (w_thin,a + w_thin,b) / 2, the size of their lumen overlaps,
     or r0 + share_k x the crossing widths for two events on one trace); its centre is their mean,
     its radius the farthest reach (r0 + half the wider vessel). Its arms are the participating traces'
@@ -1449,7 +1452,8 @@ def _output(edges, junctions):
 
 def propose(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, keep_maps: bool = False) -> dict:
     """Stages 1-6: the cleaned OD target, the band RMS maps of stage 2 and the traces of every channel, merged
-    (with keep_maps, each channel's C and S maps too, for inspection)."""
+    (with keep_maps, each channel's C and S maps too, for inspection). With cfg.bg_trace_k > 0, stage 6 feeds
+    stage 1 back once: the traced lumens join the vesselness mask, B is refitted and stages 3-6 run again."""
     s1 = photoreceptors(image, valid, cfg)
     chans = [] if keep_maps else None
     traces = _channel_traces(s1["OD"], s1["bg"], s1["ok"], cfg, keep=None if cfg.bg_trace_k > 0 else chans)
@@ -1478,7 +1482,9 @@ def run(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, debug: dict
 
 ABLATIONS = dict(full={}, no_verify=dict(verify=False), no_association=dict(association=False),
                  no_surround=dict(surround=False), v1_only=dict(surround=False, association=False, verify=False),
-                 repropose=dict(repropose=True))
+                 repropose=dict(repropose=True),
+                 no_compound_prior=dict(compound_r=float("inf")),     # typing without the dev-fitted radius rule
+                 bg_traced=dict(bg_trace_k=0.5))                       # the background leak fixed from the readout
 
 
 def annotate(image, valid):
@@ -1510,3 +1516,16 @@ def annotate_repropose(image, valid):
     """All stages with stage 8's re-proposal from the residual switched on (between its two rounds: prune,
     re-propose, prune; DESIGN's full loop)."""
     return run(image, valid, replace(DEFAULT, **ABLATIONS["repropose"]))
+
+
+def annotate_no_compound_prior(image, valid):
+    """The full annotator without the compound_r rule (a junction region of radius >= 16 px typed compound, a
+    prior fitted on the dev truth): junctions are typed from their arms alone."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["no_compound_prior"]))
+
+
+def annotate_bg_traced(image, valid):
+    """The full annotator with the background leak fixed from the readout (bg_trace_k = 0.5): the lumens traced
+    by a first pass join the vesselness mask, the background is refitted on the mask's negative and stages 3-6
+    run again (NOTES, stage 1)."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["bg_traced"]))
