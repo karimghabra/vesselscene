@@ -29,6 +29,11 @@ coordinate tie-breaks, per-pixel operations (FFT and OpenCV filters) whose resul
 number of threads. One frozen `Config` holds every parameter; `ABLATIONS` switch stages off, and the
 `annotate*` functions at the end are the entry points of the evaluation harness. The annotator reads only its
 image and valid arguments.
+
+Config.stage3 = 'hessian' (`_hessian_layers`; entry points `annotate_hessian_score` and
+`annotate_hessian_score_nearest`) replaces stage 3 by curvature analysis, one Hessian orientation per pixel
+and scale, with everything else unchanged: the ablation that isolates the orientation score (NOTES,
+'Isolating the orientation score').
 """
 from __future__ import annotations
 
@@ -65,6 +70,11 @@ class Config:
     chan_factor: tuple = (1, 2, 4)      # each channel is computed on a grid downsampled this much (stages 3-5)
     elong: tuple = (3.0, 2.5, 2.0)      # along / across std ratio per channel (coarse: shorter, fewer star rays)
     odd_alpha: float = 0.7
+    stage3: str = "orientation"         # 'hessian': one Hessian orientation per pixel and scale (_hessian_layers)
+    hessian_scale: str = "layer"        # stage3 'hessian' only: 'layer' = per-layer max over a channel's scales
+                                        # (as simple_cells), 'pixel' = the scale of the largest strength per pixel
+    hessian_bins: str = "linear"        # stage3 'hessian' only: 'linear' split between the two nearest bins, or
+                                        # 'nearest' (the whole strength in the nearest bin)
     # 4. non-classical surround
     surround: bool = True
     cross_k: float = 1.0                # subtract this x the isotropic (blob) part of the orientation tuning
@@ -296,8 +306,17 @@ def simple_cells(OD: np.ndarray, bg: np.ndarray, cfg: Config = DEFAULT) -> list:
     computed on grids downsampled cfg.chan_factor times (area average; their scales stay >= 2.1 grid px), and
     the coarse filters are less elongated (cfg.elong 3 / 2.5 / 2: long coarse filters draw star-shaped rays
     from the dark knots of wide vessels).
+    With cfg.stage3 = 'hessian' (an ablation, not a simple-cell model) each scale's response is instead
+    _hessian_layers: the curvature ridge strength in at most two orientation layers per pixel, on the same
+    channels, grids and scales, with the same max over a channel's scales.
     Returns [dict(U (n_orient, h, w), S (scale index into cfg.scales), f (grid factor), shape (full grid),
     sigma (the channel's typical scale, full-grid px))]."""
+    if cfg.stage3 not in ("orientation", "hessian"):
+        raise ValueError(f"Config.stage3 must be 'orientation' or 'hessian', not {cfg.stage3!r}")
+    if cfg.hessian_scale not in ("layer", "pixel"):
+        raise ValueError(f"Config.hessian_scale must be 'layer' or 'pixel', not {cfg.hessian_scale!r}")
+    if cfg.hessian_bins not in ("linear", "nearest"):
+        raise ValueError(f"Config.hessian_bins must be 'linear' or 'nearest', not {cfg.hessian_bins!r}")
     H0, W0 = OD.shape
     th = orientations(cfg)
     out = []
@@ -306,6 +325,25 @@ def simple_cells(OD: np.ndarray, bg: np.ndarray, cfg: Config = DEFAULT) -> list:
         f = int(cfg.chan_factor[ci]) if ci < len(cfg.chan_factor) else 1
         Xc, bgc = _down(OD, f), (_down(bg.astype(np.float32), f) > 0.5) if f > 1 else bg
         H, W = Xc.shape
+        if cfg.stage3 == "hessian":                   # the isolation ablation: same channels, grids, scales
+            U = np.full((len(th), H, W), -np.inf, np.float32)
+            S = np.zeros((len(th), H, W), np.uint8)
+            best = np.full((H, W), -np.inf, np.float32)
+            for si in chan:
+                Z = _hessian_layers(Xc, bgc, cfg.scales[si] / f, max(cfg.rms_sigma, 4 * cfg.scales[si]) / f, cfg)
+                if cfg.hessian_scale == "pixel":      # one scale, so one orientation, per pixel and channel
+                    tot = Z.sum(0)
+                    b = tot > best
+                    best = np.where(b, tot, best)
+                    U = np.where(b[None], Z, U)
+                    S[:, b] = si
+                    continue
+                better = Z > U                        # 'layer': per-layer max over scales, as simple cells
+                U = np.where(better, Z, U)
+                S[better] = si
+            out.append(dict(U=U, S=S, f=f, shape=(H0, W0),
+                            sigma=float(np.exp(np.mean(np.log([cfg.scales[i] for i in chan]))))))
+            continue
         smax = max(cfg.scales[i] for i in chan) / f
         P = int(min(math.ceil(3 * el * smax), H - 1, W - 1))
         X = np.pad(Xc.astype(np.float32), P, mode="reflect")
@@ -381,6 +419,76 @@ def _local_rms_stack(E: np.ndarray, bg: np.ndarray, s: float) -> np.ndarray:
     g = float(1.4826 * np.median(np.abs(E[:, bg]))) + 1e-9
     Q = np.minimum(E * E, np.float32((3.0 * g) ** 2)).mean(0)
     return np.sqrt(np.maximum(_masked_mean(Q, bg, s), (0.05 * g) ** 2))
+
+
+# ------------------------------------------------------------------------ 3'. the curvature (Hessian) ablation
+def _hessian(V: np.ndarray, sigma: float):
+    """Gaussian second derivatives (hxx, hyy, hxy) at scale sigma: vesselmap.ridges.hessian_eig's filters
+    (scipy gaussian_filter, reflect, truncate 3.5)."""
+    V = V.astype(np.float32, copy=False)
+    kw = dict(sigma=sigma, mode="reflect", truncate=3.5)
+    return (ndi.gaussian_filter(V, order=(0, 2), **kw), ndi.gaussian_filter(V, order=(2, 0), **kw),
+            ndi.gaussian_filter(V, order=(1, 1), **kw))
+
+
+def _eig2(hxx: np.ndarray, hyy: np.ndarray, hxy: np.ndarray):
+    """Eigen-decomposition of the 2 x 2 Hessian, exactly as vesselmap.ridges.hessian_eig: (l1, l2, nx, ny)
+    with l1 <= l2 and (nx, ny) the unit eigenvector of l1, the direction ACROSS a bright ridge."""
+    tr2 = 0.5 * (hxx + hyy)
+    disc = np.sqrt(0.25 * (hxx - hyy) ** 2 + hxy ** 2)
+    l1 = tr2 - disc
+    l2 = tr2 + disc
+    ax = np.where(np.abs(hxx - l1) > np.abs(hyy - l1), hxy, l1 - hyy)
+    ay = np.where(np.abs(hxx - l1) > np.abs(hyy - l1), l1 - hxx, hxy)
+    nrm = np.sqrt(ax ** 2 + ay ** 2) + 1e-12
+    return l1, l2, (ax / nrm).astype(np.float32), (ay / nrm).astype(np.float32)
+
+
+def _hessian_eig(V: np.ndarray, sigma: float):
+    """A reimplementation of vesselmap.ridges.hessian_eig (same filters, same formulas, same output)."""
+    return _eig2(*_hessian(V, sigma))
+
+
+def _hessian_layers(X: np.ndarray, bg: np.ndarray, s: float, ws: float, cfg: Config = DEFAULT) -> np.ndarray:
+    """Stage 3 replaced by curvature analysis (cfg.stage3 = 'hessian'): ONE orientation per pixel at scale s.
+
+    This is the isolation ablation of the orientation score (NOTES, 'Isolating the orientation score'). On the
+    grid X (a channel's grid, s in its px) the Gaussian Hessian of the cleaned OD gives l1 <= l2 (a vessel is
+    a bright ridge in OD: l1 strongly negative across it) and the ridge strength of vesselmap.ridges.ridge_maps
+    with aniso = 1, rho = s^2 max(0, -l1 - |l2|). rho is put into CNR units the way simple_cells normalises its
+    even channel: divided by the robust local RMS over the background pixels bg (window ws, _local_rms_stack:
+    Winsorised at 3x the global robust RMS, pooled over orientations) of the signed response it clips, the
+    directional second derivative -s^2 d^2/dn^2 (G_s * OD) at the cfg.n_orient normals n_k -- simple_cells'
+    even filter with elongation 1 (an isotropic Gaussian), of which -s^2 l1 is the maximum over directions.
+    The normalised strength goes into the orientation layer(s) of the Hessian's ALONG-vessel direction (the
+    perpendicular of l1's eigenvector), split linearly between the two nearest of the n_orient bins (theta
+    circular); every other layer is 0. A line half-way between two bins thus has half its strength in each
+    layer; cfg.hessian_bins = 'nearest' (a check of that) puts all of it in the nearest bin instead. There is
+    no odd-symmetric phase gating. Returns Z (n_orient, H, W): at most two non-zero layers per pixel."""
+    n = cfg.n_orient
+    hxx, hyy, hxy = _hessian(X, s)
+    l1, l2, ax, ay = _eig2(hxx, hyy, hxy)
+    rho = (np.float32(s * s) * np.maximum(-l1 - np.abs(l2), 0)).astype(np.float32)
+    th = orientations(cfg)
+    D = np.empty((n,) + X.shape, np.float32)
+    for k, t in enumerate(th):
+        nx, ny = np.float32(-math.sin(t)), np.float32(math.cos(t))
+        D[k] = -np.float32(s * s) * (hxx * (nx * nx) + hxy * (2 * nx * ny) + hyy * (ny * ny))
+    r = rho / _local_rms_stack(D, bg, ws)
+    phi = np.mod(np.arctan2(ax, -ay).astype(np.float64), np.pi)    # tangent (-ay, ax), mod pi
+    u = phi / (np.pi / n)
+    k0f = np.floor(u)
+    frac = (u - k0f).astype(np.float32)
+    k0 = k0f.astype(np.int64) % n
+    k1 = (k0 + 1) % n
+    yy, xx = np.indices(X.shape)
+    Z = np.zeros((n,) + X.shape, np.float32)
+    if cfg.hessian_bins == "nearest":                 # check of the split: the whole strength in one layer
+        Z[np.where(frac < 0.5, k0, k1), yy, xx] = r
+        return Z
+    Z[k0, yy, xx] = (1 - frac) * r
+    Z[k1, yy, xx] = frac * r
+    return Z
 
 
 # ======================================================================== 4. non-classical surround
@@ -1480,11 +1588,20 @@ def run(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, debug: dict
     return _output(edges, junctions)
 
 
+HESS_T_HIGH, HESS_T_LOW = 1.0, 0.6      # dev-best thresholds of stage3 = 'hessian' (NOTES, 'Isolating ...')
+HESSN_T_HIGH, HESSN_T_LOW = 1.25, 0.5   # ... of stage3 = 'hessian' with hessian_bins = 'nearest'
+V1_T_HIGH, V1_T_LOW = 3.5, 2.0          # dev-best thresholds of v1_only after the review fixes (same grid)
 ABLATIONS = dict(full={}, no_verify=dict(verify=False), no_association=dict(association=False),
                  no_surround=dict(surround=False), v1_only=dict(surround=False, association=False, verify=False),
                  repropose=dict(repropose=True),
                  no_compound_prior=dict(compound_r=float("inf")),     # typing without the dev-fitted radius rule
-                 bg_traced=dict(bg_trace_k=0.5))                       # the background leak fixed from the readout
+                 bg_traced=dict(bg_trace_k=0.5),                       # the background leak fixed from the readout
+                 # isolating the orientation score (NOTES, 'Isolating the orientation score'): each variant at
+                 # the thresholds of its own dev sweep (t_high x t_low grid, NOTES composite, 3 dev scenes)
+                 hessian_score=dict(stage3="hessian", t_high=HESS_T_HIGH, t_low=HESS_T_LOW),
+                 hessian_score_nearest=dict(stage3="hessian", hessian_bins="nearest", t_high=HESSN_T_HIGH,
+                                            t_low=HESSN_T_LOW),
+                 v1_only_own=dict(surround=False, association=False, verify=False, t_high=V1_T_HIGH, t_low=V1_T_LOW))
 
 
 def annotate(image, valid):
@@ -1529,3 +1646,34 @@ def annotate_bg_traced(image, valid):
     by a first pass join the vesselness mask, the background is refitted on the mask's negative and stages 3-6
     run again (NOTES, stage 1)."""
     return run(image, valid, replace(DEFAULT, **ABLATIONS["bg_traced"]))
+
+
+def annotate_hessian_score(image, valid):
+    """The full annotator (stages 1-8) with stage 3 replaced by curvature analysis (Config.stage3 = 'hessian',
+    _hessian_layers): per scale, the Hessian ridge strength s^2 max(0, -l1 - |l2|) of vesselmap's ridge_maps
+    (aniso 1), CNR-normalised like simple_cells, in at most two orientation layers per pixel (the Hessian's
+    along-vessel direction, split linearly between its two nearest bins), no phase gating. Same channels,
+    grids, scales and per-channel max over scales; stages 1, 2 and 4-8 unchanged. It isolates what keeping a
+    full orientation score U(x, y, theta) buys over one Hessian orientation per pixel, with everything else
+    (background, SE(2) readout, graph logic and compound prior, refinement) held fixed. Thresholds: the dev-best
+    of its own t_high x t_low sweep on the 3 dev scenes, average and frame (NOTES composite; NOTES, 'Isolating
+    the orientation score'): HESS_T_HIGH / HESS_T_LOW."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["hessian_score"]))
+
+
+def annotate_v1_only_own(image, valid):
+    """annotate_v1_only (stages 1-3 + 6-7: the orientation score read out without surround, association field
+    or refinement) at ITS OWN dev-best thresholds instead of the full annotator's 3.0 / 1.5, so the ablation
+    does not also move the operating point. Thresholds V1_T_HIGH / V1_T_LOW: the dev-best of the t_high x
+    t_low sweep re-run after the review fixes on the 3 dev scenes, average and frame (NOTES composite; NOTES,
+    'Isolating the orientation score'; the older own-threshold sweep, before the fixes, gave 3.5 / 1.7)."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["v1_only_own"]))
+
+
+def annotate_hessian_score_nearest(image, valid):
+    """annotate_hessian_score with the whole Hessian strength in the NEAREST orientation bin
+    (Config.hessian_bins = 'nearest') instead of split linearly between the two nearest: a check that the
+    linear split, which halves a line's response in each layer when it lies half-way between two bins, is
+    not what costs the curvature variant. Thresholds HESSN_T_HIGH / HESSN_T_LOW: the dev-best of its own
+    t_high x t_low sweep on the 3 dev scenes (NOTES, 'Isolating the orientation score')."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["hessian_score_nearest"]))

@@ -34,7 +34,16 @@ Later runs reuse it; the export above runs on the cached network every time, and
 ``build_seconds``, ``vesselmap_config`` and ``from_cache`` (the harness copies them into its row; its
 ``seconds`` of a cached run is the export time).  vesselmap is not bit-reproducible (torch reductions on several
 threads), so a cached result is what makes a rerun identical: a run served from the cache reports
-``from_cache`` and the harness then records determinism as not tested.
+``from_cache`` and the harness then records determinism as not tested.  The output also carries
+``vesselmap_version`` (``vesselmap_version()``, a hash of the vesselmap sources; the harness copies it into
+every row), so each result names the vesselmap it came from.
+
+Getting vesselmap.  It is part of LIMBUS, https://github.com/karimghabra/limbus: clone it next to this
+repository as ../limbus (or point $LIMBUS_DATA at a checkout) and install its requirements-vesselmap.txt
+(numpy, scipy, scikit-image, opencv-python, tifffile, torch, networkx, matplotlib, imageio-ffmpeg).  The
+held-out results were made with LIMBUS commit 081072075e7140878994147e9cc755ed93d54e5b
+(``git -C ../limbus checkout 081072075e7140878994147e9cc755ed93d54e5b``), whose vesselmap sources hash to
+``vesselmap_version() == 'ffa106c7c6c35f9d'``; another checkout re-keys the cache and builds afresh.
 """
 from __future__ import annotations
 
@@ -156,5 +165,6 @@ def annotate(image: np.ndarray, valid: np.ndarray) -> dict:
     from vesselmap.network import VesselNetwork
     assert res["config"] == CONFIG and res.get("vesselmap") == vesselmap_version(), (path, res["config"])
     out = export(VesselNetwork.from_dict(res["net"]))
-    out.update(build_seconds=res["seconds"], vesselmap_config=res["config"], from_cache=cached)
+    out.update(build_seconds=res["seconds"], vesselmap_config=res["config"], from_cache=cached,
+               vesselmap_version=vesselmap_version())
     return out

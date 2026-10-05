@@ -1,12 +1,19 @@
-"""Score several annotators on the same scenes and write one comparison table.
+r"""Score several annotators on the same scenes and write one comparison table.
 
     python -m experiments.neuromimetic.evaluate --scenes DIR [DIR ...] --out results/test \
         --annotators experiments.neuromimetic.neuromimetic:annotate experiments.neuromimetic.baseline_hessian:annotate
 
 Writes <out>/<module>.<function>.json per annotator (harness.run rows and summary) and <out>/table.md: the
 mean and range over the scenes of each score, per image kind, in two tables (lines and edges; junctions and
-their types, with the majority-label and balanced-accuracy references next to the type accuracies).  An
-annotator whose JSON already exists in <out> is not run again.
+their types, with the majority-label and balanced-accuracy references next to the type accuracies).
+
+Existing results are reused: an annotator whose <out>/<name>.json already exists is not run again, its rows
+are read from that file (delete the file to re-run it).  table.md covers only the annotators named on this
+command line.  The tables of a whole results folder -- table_all.md over every JSON in it, paired.md (the full
+annotator minus each other one, per image) and ceiling.json (the truth's own graph scored by the harness) --
+are made by report.py:
+
+    python -m experiments.neuromimetic.report results/test [--scenes DIR [DIR ...] --ceiling]
 """
 from __future__ import annotations
 
@@ -64,13 +71,15 @@ def table(results: dict, kinds) -> str:
 
 
 def main(argv=None):
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0],
+                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
     ap.add_argument("--annotators", nargs="+", required=True)
     ap.add_argument("--scenes", nargs="+", required=True)
     ap.add_argument("--kinds", nargs="+", default=["average", "frame"])
     ap.add_argument("--repeat", type=int, default=2)
     ap.add_argument("--no-repeat", nargs="*", default=[], help="annotators to run once (known not bit-reproducible)")
-    ap.add_argument("--out", required=True)
+    ap.add_argument("--out", required=True,
+                    help="results folder; an existing <out>/<name>.json is reused, not re-run")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
     results = {}

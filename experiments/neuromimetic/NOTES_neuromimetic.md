@@ -363,7 +363,8 @@ stages 1-7, 0.692 / 0.647 without association, 0.672 / 0.647 without surround, 0
 
 ### Ablations at each variant's own best thresholds
 
-This sweep was run before the review fixes (log 26), and was not repeated after them. The ablations above
+This sweep was run before the review fixes (log 26). Only V1 only was re-swept after them: its
+dev-best is now 3.5 / 2.0 (see Isolating the orientation score). The ablations above
 share the thresholds of the full annotator. But the surround and the association field
 lower C, so at shared thresholds an ablation also moves the operating point. To separate the two effects,
 each variant was swept over `(t_high, t_low)` with stage 8 off: 2.0/1.0, 2.5/1.3, 3.0/1.5, 3.5/1.7,
@@ -392,6 +393,206 @@ What the ablations say:
   - Overall composite: 0.671 / 0.664 against 0.673 / 0.655, which is neutral.
 - **Re-proposal (`annotate_repropose`)** adds junctions faster than true lines (junction precision 0.82 →
   0.54 on averages), and costs typing.
+
+## Isolating the orientation score
+
+**Question.** Does the advantage over curvature (Hessian) analysis come from keeping a full orientation
+score `U(x, y, theta)`, or from the rest of the pipeline? The rest is the stage 1 background, the SE(2)
+readout, the stage 7 graph logic with its compound prior, the refinement and the tuning. `baseline_hessian`
+differs from `annotate` in all of these at once, so it cannot answer this.
+
+**Design: swap only stage 3** (`Config.stage3 = 'hessian'`, `_hessian_layers`; the default
+`'orientation'` is unchanged).
+- **Same inputs and grids.** The Hessian runs on the same cleaned OD, channels, downsampled grids and scales
+  (fine 1.5-3, medium 4.2-6, coarse 8.5-24 px).
+- **Ridge strength.** At each scale s: the Gaussian Hessian of OD, with vesselmap's own filters
+  (`scipy.ndimage.gaussian_filter`, reflect, truncate 3.5). `_hessian_eig` reimplements
+  `vesselmap.ridges.hessian_eig` and gives bit-identical output on a dev image at s = 1.5, 2.1 and 3.
+  Vessels are bright in OD, so l1 <= l2 and l1 is strongly negative across a vessel. The strength is
+  `rho = s² max(0, -l1 - |l2|)`, `ridge_maps`' measure with aniso = 1.
+- **CNR units.** rho is divided by the robust local RMS over background pixels of the signed response it
+  clips. That response is the directional second derivative `-s² ∂²/∂n² (G_s * OD)` at the 16 normals n_k.
+  `-s² l1` is its maximum over directions, and it is simple_cells' even filter at elongation 1.
+  - The RMS comes from the same `_local_rms_stack` as simple_cells: Winsorised at 3x the global robust RMS,
+    pooled over orientations, window `max(24, 4 s)` px.
+  - So `t_high` / `t_low` are in the same CNR units as for the orientation score.
+- **One orientation per pixel and scale.** The normalised strength goes into the layers of the Hessian's
+  along-vessel direction (perpendicular to l1's eigenvector), split linearly between the two nearest of the
+  16 bins. Every other layer is 0.
+- **Max over scales.** Per channel, the per-layer max over its scales, the same code as simple_cells.
+- **No phase gating.** There is no odd partner.
+- **Everything downstream is unchanged:** surround, association field, readout, merge, end_stopping and
+  refine.
+- **Thresholds.** Only `t_high` / `t_low` were re-tuned.
+- **Checks of the construction.**
+  - `hessian_bins = 'nearest'` puts the whole strength into the nearest bin. With the linear split, a line
+    half-way between two bins has half its strength in each layer.
+  - `hessian_scale = 'pixel'` keeps one scale per pixel and channel, so a channel's U also has only one
+    orientation per pixel. With the per-layer max, a pixel can carry the orientations of several scales:
+    up to 6 non-zero layers in the fine channel, 4 in the medium and 8 in the coarse, on healthy_s004
+    frame.
+  - `v1_only` with `stage3 = 'hessian'` is the context-free counterpart of `annotate_v1_only` (stages 1-3,
+    6-7).
+
+**Tuning.**
+- **Scores.** Composite = the mean of centreline F1, strict junction F1, balanced coarse type accuracy and
+  edge cover. Per kind, each score is averaged over the 3 dev scenes; the composite is then averaged over
+  average and frame.
+- **Speed-up.** The sweep cached stages 1-5 per image (the thresholds enter only at the readout) and ran
+  readout, merge, stage 7 and stage 8 per threshold pair. For `annotate_hessian_score`,
+  `annotate_hessian_score_nearest`, `annotate_v1_only_own` and `annotate_v1_only`, the cached path's
+  output digests equal the entry points' on all 6 images.
+- **Grid.** The required grid is t_high 2.0-4.0 × t_low 1.0-2.0. The Hessian variant's best lay on its low
+  corner (2.0 / 1.0: 0.539). The grid was therefore extended down until the best was interior.
+
+Grid for `stage3 = 'hessian'`: composite, with (average / frame) in brackets.
+
+| t_high \ t_low | 0.4 | 0.5 | 0.6 | 0.75 | 0.85 | 1 | 1.2 | 1.5 | 1.7 | 2 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| 0.75 | 0.563 (0.548 / 0.579) | 0.564 (0.555 / 0.573) | 0.582 (0.582 / 0.581) | - | - | - | - | - | - | - |
+| 0.85 | - | 0.565 (0.554 / 0.576) | 0.582 (0.582 / 0.582) | - | - | - | - | - | - | - |
+| 1 | 0.581 (0.580 / 0.581) | 0.570 (0.565 / 0.575) | **0.585 (0.582 / 0.588)** | 0.567 (0.585 / 0.549) | 0.545 (0.559 / 0.531) | - | - | - | - | - |
+| 1.25 | - | 0.574 (0.582 / 0.566) | 0.584 (0.593 / 0.574) | 0.566 (0.587 / 0.545) | 0.545 (0.560 / 0.530) | 0.551 (0.569 / 0.534) | 0.538 (0.545 / 0.531) | - | - | - |
+| 1.5 | - | 0.579 (0.588 / 0.571) | 0.577 (0.590 / 0.563) | 0.564 (0.577 / 0.550) | 0.552 (0.564 / 0.541) | 0.550 (0.569 / 0.531) | 0.540 (0.549 / 0.531) | - | - | - |
+| 1.75 | - | 0.577 (0.593 / 0.561) | 0.576 (0.592 / 0.560) | 0.570 (0.579 / 0.561) | 0.552 (0.567 / 0.537) | 0.551 (0.570 / 0.533) | 0.532 (0.544 / 0.521) | - | - | - |
+| 2 | - | 0.569 (0.587 / 0.552) | 0.561 (0.570 / 0.552) | 0.559 (0.565 / 0.553) | 0.540 (0.556 / 0.524) | 0.539 (0.555 / 0.524) | 0.517 (0.526 / 0.508) | 0.491 (0.502 / 0.481) | 0.486 (0.477 / 0.496) | - |
+| 2.5 | - | - | - | - | - | 0.520 (0.526 / 0.514) | 0.508 (0.513 / 0.503) | 0.485 (0.496 / 0.474) | 0.472 (0.474 / 0.469) | 0.417 (0.470 / 0.364) |
+| 3 | - | - | - | - | - | 0.470 (0.486 / 0.454) | 0.465 (0.469 / 0.461) | 0.438 (0.450 / 0.425) | 0.417 (0.445 / 0.389) | 0.448 (0.472 / 0.424) |
+| 3.5 | - | - | - | - | - | 0.450 (0.488 / 0.412) | 0.446 (0.477 / 0.416) | 0.440 (0.457 / 0.424) | 0.414 (0.446 / 0.381) | 0.404 (0.491 / 0.317) |
+| 4 | - | - | - | - | - | 0.454 (0.468 / 0.439) | 0.444 (0.455 / 0.433) | 0.421 (0.444 / 0.399) | 0.426 (0.426 / 0.426) | 0.413 (0.471 / 0.355) |
+
+- **Dev-best: 1.0 / 0.6, composite 0.585.**
+- **The surface is flat near the best.** The composite is 0.570-0.585 for t_high 1.0-1.75 at t_low 0.5-0.6.
+  The best thresholds are low because the Hessian's CNR is lower than the orientation score's, for two reasons:
+  - Its filters are isotropic, so they do not integrate along the vessel. On a synthetic line at sigma 2.1 the peak
+    is about 0.7 of the elongated (3x) even filter's.
+  - The linear split puts as little as half the strength into a layer.
+- **Missing scores.** In 2 cells (3.5 / 1.7, 3.5 / 2.0), healthy_s004 frame matched no junction, so its
+  balanced type accuracy is undefined. It is left out of that cell's mean.
+
+**The three checks**, each at the dev-best of its own sweep:
+
+| variant | dev-best t_high / t_low | composite (average / frame) |
+|---|---|---|
+| `hessian_bins = 'nearest'` (`annotate_hessian_score_nearest`) | 1.25 / 0.5 | 0.613 (0.626 / 0.601) |
+| `hessian_scale = 'pixel'` | 1.0 / 0.85 | 0.579 (0.578 / 0.580) |
+| stages 1-3 + 6-7 with `stage3 = 'hessian'` | 2.0 / 0.75 | 0.558 (0.580 / 0.535) |
+
+- **Grids.** Each check was swept over the union of the required grid and the extension: t_high 1.0-2.0 ×
+  t_low 0.5-1.2 with t_low < t_high. For nearest, t_low 0.3 and 0.4 were added at t_high 1.0-1.5.
+- **Each surface is flat near its best.** The values below are composite against t_high:
+  - nearest: 0.599-0.613 for t_high 1.0-2.0 at t_low 0.4-0.6, and 0.582 / 0.546 / 0.523 / 0.501 at
+    t_high 2.5 / 3 / 3.5 / 4 with t_low 1.0;
+  - pixel: 0.570-0.579 for t_high 1.0-1.75 at t_low 0.5-0.85, and 0.503 / 0.492 / 0.473 / 0.416 at
+    t_high 2.5 / 3 / 3.5 / 4 with t_low 1.0;
+  - context-free Hessian: 0.546-0.558 for t_high 1.5-2.0 at t_low 0.75-1.2, and 0.545 / 0.545 / 0.515 /
+    0.486 at t_high 2.5 / 3 / 3.5 / 4 with t_low 1.0.
+
+**`annotate_v1_only` at its own thresholds, re-run after the review fixes.** Same grid, plus an edge check
+at t_low 2.2 / 2.5 and t_high 4.5:
+
+| t_high \ t_low | 1 | 1.2 | 1.5 | 1.7 | 2 | 2.2 | 2.5 |
+|---|---|---|---|---|---|---|---|
+| 2 | 0.517 (0.641 / 0.392) | 0.529 (0.657 / 0.400) | 0.564 (0.677 / 0.452) | 0.594 (0.683 / 0.505) | - | - | - |
+| 2.5 | 0.562 (0.660 / 0.463) | 0.586 (0.683 / 0.490) | 0.601 (0.689 / 0.514) | 0.619 (0.690 / 0.549) | 0.646 (0.698 / 0.593) | - | - |
+| 3 | 0.605 (0.679 / 0.532) | 0.623 (0.690 / 0.556) | 0.647 (0.700 / 0.594) | 0.658 (0.703 / 0.613) | 0.669 (0.709 / 0.629) | 0.664 (0.704 / 0.625) | 0.669 (0.694 / 0.644) |
+| 3.5 | 0.645 (0.685 / 0.605) | 0.651 (0.689 / 0.614) | 0.669 (0.700 / 0.638) | 0.670 (0.699 / 0.642) | **0.674 (0.695 / 0.654)** | 0.666 (0.693 / 0.638) | 0.667 (0.688 / 0.645) |
+| 4 | 0.644 (0.681 / 0.608) | 0.646 (0.677 / 0.615) | 0.658 (0.679 / 0.637) | 0.661 (0.682 / 0.640) | 0.660 (0.674 / 0.646) | 0.654 (0.675 / 0.632) | 0.657 (0.680 / 0.634) |
+| 4.5 | - | - | - | - | 0.646 (0.659 / 0.634) | 0.641 (0.657 / 0.625) | 0.647 (0.670 / 0.624) |
+
+- **The dev-best is now 3.5 / 2.0 (composite 0.674), not 3.5 / 1.7.** 3.5 / 1.7 (0.670) and 3.0 / 2.0 or
+  3.0 / 2.5 (0.669) are within the noise.
+- `V1_T_HIGH, V1_T_LOW = 3.5, 2.0`; the entry point is `annotate_v1_only_own`.
+
+**Dev table.**
+- Each row comes from `python -m experiments.neuromimetic.harness --annotator <fn> --scenes <3 dev scenes>
+  --kinds average frame --repeat 2`, and every row is deterministic. Each row is the mean of the 3 dev scenes.
+- `annotate` and `annotate_v1_only` reproduce the table above exactly.
+- s is the faster run, on 2 threads, with up to two other single-thread jobs on the 4-core machine.
+
+| annotator | stage 3 | t_high / t_low | kind | clR | clP | clF | jF | jF strict | coarse type (maj.) | coarse bal. | xR | xP | cover | purity | s | comp. |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `annotate` | orientation score | 3.0 / 1.5 | average | 0.706 | 0.948 | 0.805 | 0.694 | 0.651 | 0.549 (0.522) | 0.581 | 0.375 | 0.573 | 0.649 | 0.884 | 6.1 | 0.671 |
+| | | | frame | 0.701 | 0.950 | 0.801 | 0.608 | 0.587 | 0.560 (0.483) | 0.616 | 0.333 | 0.462 | 0.651 | 0.848 | 5.9 | 0.664 |
+| `annotate_hessian_score` | Hessian, linear split | 1.0 / 0.6 | average | 0.639 | 0.817 | 0.714 | 0.632 | 0.560 | 0.506 (0.537) | 0.488 | 0.195 | 0.531 | 0.568 | 0.885 | 7.8 | 0.582 |
+| | | | frame | 0.667 | 0.801 | 0.724 | 0.608 | 0.521 | 0.511 (0.453) | 0.530 | 0.153 | 0.583 | 0.580 | 0.873 | 9.0 | 0.588 |
+| `annotate_hessian_score_nearest` | Hessian, nearest bin | 1.25 / 0.5 | average | 0.658 | 0.790 | 0.715 | 0.693 | 0.644 | 0.562 (0.514) | 0.569 | 0.216 | 0.678 | 0.576 | 0.903 | 8.4 | 0.626 |
+| | | | frame | 0.680 | 0.760 | 0.715 | 0.645 | 0.586 | 0.504 (0.476) | 0.514 | 0.181 | 0.667 | 0.590 | 0.887 | 10.6 | 0.601 |
+| `annotate_v1_only` (1-3, 6-7) | orientation score | 3.0 / 1.5 | average | 0.762 | 0.908 | 0.823 | 0.767 | 0.715 | 0.580 (0.499) | 0.571 | 0.408 | 0.560 | 0.692 | 0.898 | 3.5 | 0.700 |
+| | | | frame | 0.778 | 0.691 | 0.723 | 0.552 | 0.528 | 0.487 (0.452) | 0.485 | 0.306 | 0.311 | 0.640 | 0.909 | 4.2 | 0.594 |
+| `annotate_v1_only_own` (1-3, 6-7) | orientation score | 3.5 / 2.0 | average | 0.734 | 0.945 | 0.821 | 0.722 | 0.679 | 0.605 (0.499) | 0.590 | 0.389 | 0.574 | 0.687 | 0.876 | 3.1 | 0.695 |
+| | | | frame | 0.724 | 0.870 | 0.783 | 0.663 | 0.620 | 0.481 (0.472) | 0.556 | 0.292 | 0.424 | 0.658 | 0.870 | 3.3 | 0.654 |
+| `baseline_hessian` | (own pipeline) | tuned | average | 0.584 | 0.815 | 0.678 | 0.539 | 0.487 | 0.375 (0.595) | 0.393 | 0.062 | 0.241 | 0.528 | 0.788 | 0.8 | 0.521 |
+| | | | frame | 0.655 | 0.665 | 0.653 | 0.541 | 0.462 | 0.424 (0.503) | 0.379 | 0.056 | 0.333 | 0.552 | 0.808 | 1.2 | 0.512 |
+
+The context-free Hessian check (stages 1-3, 6-7 with `stage3 = 'hessian'`, 2.0 / 0.75) comes from the
+cached sweep, not from an entry point:
+- average: clR 0.700, clP 0.764, clF 0.728, strict jF 0.560, coarse balanced 0.463, cover 0.570;
+- frame: clR 0.694, clP 0.658, clF 0.671, strict jF 0.506, coarse balanced 0.423, cover 0.540;
+- composite 0.558.
+
+**What it says** (dev only, 6 images; differences of about 0.01 are noise). Composites below are the mean of
+average and frame.
+- **About half of the gap over the Hessian baseline is the orientation score; the other half is the
+  pipeline.**
+  - `annotate` against `baseline_hessian`: 0.668 against 0.516, a gap of 0.152.
+  - Swapping only stage 3 for the Hessian (`annotate_hessian_score`, re-tuned) gives 0.585. Keeping the full
+    orientation score is therefore worth 0.083, or 0.055 against the more generous nearest-bin variant
+    (0.613).
+  - The rest of the pipeline, fed with Hessian orientations, is worth 0.069 (or 0.097) over the baseline.
+    This covers the background, the SE(2) tracker, the graph logic and compound prior, and the refinement.
+- **The orientation score matters more without context.** Without stages 4, 5 and 8, at each variant's own
+  thresholds:
+  - orientation score (`annotate_v1_only_own`) 0.674, against 0.558 for the Hessian: a gap of 0.116;
+  - the contextual stages lift the Hessian variant by only 0.027 (0.558 to 0.585);
+  - for the orientation score they are neutral on the composite (0.674 against 0.668).
+- **Where the orientation score wins:**
+  - **Crossings.** Crossing recall is 0.375 / 0.333 with the orientation score, 0.195 / 0.153 with the
+    Hessian in the same pipeline (0.216 / 0.181 nearest-bin), and 0.06 for the baseline. Most of
+    the README's crossing advantage needs the orientation score. Of the 0.30 gap in crossing recall
+    between `annotate` and the baseline, about 0.12 (0.14 nearest-bin) survives with one Hessian
+    orientation per pixel; that part comes from the pipeline. The other 0.16-0.18 needs a second
+    orientation layer at the crossing.
+  - **Line precision and recall together.** Centreline precision is 0.95 against 0.80, and recall is 0.70
+    against 0.65.
+  - **Line F1 and edge cover.** 0.80 against 0.71-0.72, and 0.65 against 0.57-0.59. Even and odd gating,
+    elongated filters and several orientations per pixel keep texture and wall echoes out at a threshold
+    that still reaches faint vessels.
+- **Where it does not.**
+  - With the nearest-bin assignment, strict junction F1 is close to the full annotator: 0.644 / 0.586
+    against 0.651 / 0.587. Junction detection itself comes mostly from stage 7's end-stopping logic.
+  - Coarse balanced typing is 0.569 / 0.514 against 0.581 / 0.616, with fewer crossings to type.
+- **Construction checks.**
+  - The linear split costs 0.028 against the nearest bin; the half-strength layers lower junction F1 most.
+  - One scale per pixel ('pixel', 0.579) is no different from the per-layer max (0.585).
+  - So the Hessian's deficit is not an artefact of the binning. It is what one orientation per pixel, with
+    no elongation and no phase gating, gives in this pipeline.
+- **What this does not separate.** Stage 3's design has three ingredients: several orientations per pixel
+  (the score itself), elongated filters along the vessel, and odd-symmetric phase gating. This ablation
+  swaps all three at once. An elongation-1 orientation score, and one without the odd partner, would split
+  them.
+- **V1 only at its own thresholds**, after the review fixes:
+  - It equals the full annotator on dev: 0.674 against 0.668 (average 0.695 against 0.671, frame 0.654
+    against 0.664).
+  - Frame centreline precision is still lower, 0.870 against 0.950. Frame junction precision is the same
+    (0.80 against 0.81, not in the table).
+  - The README's "context is what makes it robust on frames" therefore holds for line precision. On the
+    dev composite it is within noise once V1 only gets a higher t_low.
+
+**Sanity checks.**
+- **The default output is unchanged.** `annotate`'s digests on the 6 dev images are the same before and
+  after this change: healthy_s000 03f8801cce4079a3 / ca282112a4c3cbdc, healthy_s004
+  b23a0aa41267883a / 7b3ff07e13136f95, pathologic_s000 017517a5b3de1241 / c22cd2fa125471f6 (average /
+  frame).
+- **Layer counts.** In the Hessian stack, each scale has at most 2 non-zero layers per pixel, and at most 1
+  with 'nearest'.
+  - Where rho > 0 there are 2, or 1 where the tangent falls exactly on a bin (a few pixels with a tangent
+    of exactly 0 deg). Where rho = 0 there are none, and no layer is negative.
+  - The layers of a pixel sum to its normalised strength.
+  - Checked on all 9 scales of all 6 dev images (`_hessian_layers`). After the max over a channel's scales
+    ('layer' mode), a pixel can carry up to 6 / 4 / 8 non-zero layers (fine / medium / coarse; see Design).
+- **Determinism.** All five neuromimetic rows and the baseline are deterministic over 2 runs on all 6
+  images.
 
 ## Development log (what each change did)
 
