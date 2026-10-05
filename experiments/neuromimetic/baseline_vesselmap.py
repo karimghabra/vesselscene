@@ -1,10 +1,11 @@
-"""Comparison annotator: the user's own mapper, LIMBUS vesselmap ``build_map``, behind the harness contract.
+"""Comparison annotator: LIMBUS vesselmap ``build_map`` (the current curvature-based mapper) behind the
+harness contract.
 
-vesselmap (``/home/user/karimghabra/limbus/vesselmap``) proposes centrelines from multi-scale Hessian ridges of
-the residual log image, band by band from coarse to fine, turns them into B-spline edges, joins them (gap
-bridging, snapping free ends onto vessels, straight-through pairs at 4-way nodes joined into one edge that
-passes over), fits every spline and the background jointly with a differentiable renderer, and prunes edges
-that do not pay for themselves (BIC / MDL).  This module only converts the input and the output:
+vesselmap (``$LIMBUS_DATA/vesselmap`` or ``../limbus/vesselmap``) proposes centrelines from multi-scale
+Hessian ridges of the residual log image, band by band from coarse to fine, turns them into B-spline edges,
+joins them (gap bridging, snapping free ends onto vessels, straight-through pairs at 4-way nodes joined into
+one edge that passes over), fits every spline and the background jointly with a differentiable renderer, and
+prunes edges that do not pay for themselves (BIC / MDL).  This module only converts the input and the output:
 
   * input: the still in DN -> vesselmap's [0, 1] intensity (12-bit: / 4095; NaN stays NaN, so ``prepare``
     marks it and a 3 px margin invalid; saturated glare at 4095 -> 1.0 is masked by ``prepare`` too);
@@ -45,7 +46,9 @@ import time
 
 import numpy as np
 
-LIMBUS = "/home/user/karimghabra/limbus"
+from . import limbus_root
+
+LIMBUS = limbus_root()                  # $LIMBUS_DATA or ../limbus
 CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_cache", "vesselmap")
 FULL_SCALE = 4095.0
 # MapConfig overrides: none (the defaults), or the README's faster discovery setting (about 40 % less time at

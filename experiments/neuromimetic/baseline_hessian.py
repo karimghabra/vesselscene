@@ -56,7 +56,9 @@ from scipy import ndimage as ndi
 from skimage.filters import apply_hysteresis_threshold
 from skimage.morphology import skeletonize
 
-LIMBUS = "/home/user/karimghabra/limbus"
+from . import limbus_root                             # noqa: E402
+
+LIMBUS = limbus_root()                                 # $LIMBUS_DATA or ../limbus
 if LIMBUS not in sys.path:
     sys.path.insert(0, LIMBUS)
 from vesselmap.image import robust_noise_map          # noqa: E402  (MAD of the Laplacian, per tile)

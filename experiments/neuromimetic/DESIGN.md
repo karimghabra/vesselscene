@@ -26,6 +26,16 @@ breaks dotted capillaries at red-cell gaps and makes texture lumps look like sho
 | 7. end-stopped cells | line terminations | a curve ending on another is a 3-way junction (T or Y); two curves passing through each other at different orientations make a crossing; a cluster with more arms makes a compound |
 | 8. iterative refinement | (the lesson from diffusion models: refine step by step towards a prior, deterministically, as DDIM does) | render the candidate graph in OD (densities add where vessels overlap), take the residual against the **cleaned OD target**, prune edges that do not pay for themselves (MDL), propose what the residual still shows, and repeat a fixed number of times |
 
+**As built** (`neuromimetic.py`; details in NOTES_neuromimetic.md). Three stages differ from the table:
+- Stage 2's CNR sets the background mask and the visibility floor of stage 8, but does not feed V1, which
+  filters the cleaned OD directly.
+- Stage 4 suppresses by subtraction (the isotropic part of the tuning, the weaker flank), not by divisive
+  normalisation.
+- Stage 8 re-proposes from the residual only in `annotate_repropose`: on the development scenes it added
+  false T arms. The default prunes only.
+
+Results on held-out scenes are in README.md.
+
 ## The residual rule
 
 When residuals are computed from a render of the candidate graph, the target is the image's own optical
