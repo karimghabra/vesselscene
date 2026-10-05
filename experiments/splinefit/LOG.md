@@ -848,3 +848,126 @@ problem of the new nodes: in the tier-2 confusion (E14, both runs) the big error
 crossing (53) or 3-way (60), and truth 3-way typed crossing (37), all on proposal-typed junctions.
 (The first E15 run crashed at the 600 s wall clock under machine load from a concurrent diagnostic; the
 re-run took 394 s.)
+
+E16 result (tier 1, 167f2fb): composite 0.787676 (-0.00075), **discarded**. Not held in direction:
+- probes IDENTICAL (34 of 34 digests): on the small probe images the arms' templates find fewer than 30
+  background positions, so the MDL test still decided every probe arm;
+- fast -0.0015, on 6 crops; the CFAR criterion is MORE permissive than the MDL cost, not less: precision
+  fell (s008 average 0.991 -> 0.966, s008 frame 0.996 -> 0.965, pathologic frame 0.986 -> 0.941) while
+  recall rose (s000 average 0.792 -> 0.810).
+Model update: a null measured on the vessel-free background is narrower than the error the arms actually live
+in. Arms sit next to fitted vessels, where the residual holds the vessels' misfit echoes (profile mismatch,
+halo, red-cell texture), not the background's texture. A calibrated null must be taken where the arms are:
+e.g. the same template translated ALONG the parent vessel's flank (a local, context-matched null), not over
+empty background.
+
+### E17: iterate the retarget (EM between the background and the vessels) (pre-registered; review finding)
+
+Hypothesis: the target loses a third of the true OD on the pathologic image (tier2diag: target_keep 0.66).
+retarget re-fits B outside the render's support, but the render was fitted to stage 1's leaky target, so it
+is fainter and narrower than the vessels, and its support (R > 0.5 sigma, dilated 3 px) still leaves their
+flanks and halo in B. One retarget is one E-step. Alternating once more (fit the profiles to the re-cleaned
+target, re-derive the support from that stronger render, re-fit B) should keep more OD in the target, like
+an EM iteration toward the fixed point of 'background = what the vessels do not explain'.
+Change: the final stage runs as retarget_rounds = 2 rounds (retarget, then iters_final / 2 = 30 iterations,
+geometry frozen), the same total iteration count. One parameter (retarget_rounds).
+Predicted: graph and pos IDENTICAL (topology and geometry are fixed before the retarget); width up slightly
+(widths fit to a fuller target); explained up on the crops with wide vessels (pathologic most, +0.005 to
++0.02), explained_junction up; probes about equal (+-0.002). Composite +0.001 to +0.004. If held, tier2diag
+target_keep up on pathologic.
+
+E17 result (tier 1, 10d3d2d): composite 0.789640 (+0.00122), **discarded** (below the threshold, one parameter
+more). Partly held:
+- graph +0.00001 and pos identical (held: the topology and geometry are fixed before the retarget);
+- explained +0.0059 and explained_junction +0.0062 (held); target_fidelity up on 10 of 10 crops (+0.002 to
+  +0.034, s004 frame 0.847 -> 0.881): the EM step does recover OD from the background;
+- width -0.0047 (NOT held). The radius grows into the recovered flank and halo OD instead of the halo taking
+  it: width bias s000 average +0.006 -> +0.029, s004 average +0.10 -> +0.14, while the under-wide vessels
+  (s007 frame -0.14 -> -0.12) improve;
+- probes +0.0022 (width sweep mean 0.831 -> 0.853, line_d2.5 0.64 -> 0.73; fork_thin -0.017);
+- the pathologic average crop's target_fidelity stays at 0.25 -> 0.26: its leak is an unrendered very wide
+  structure that no render support covers, not the flanks of rendered vessels.
+Model update: a fuller target helps the render but the profile model then trades halo for radius. The EM
+step and a better-constrained halo (or r anchored at the proposal's calibre during the final fit) belong
+together; on their own, the width part cancels the explained gain in the composite.
+
+### Tier 2 and the whole-image recording (batch 5)
+
+No batch-5 change was kept, so the final kept state is the confirmed E14 pipeline. Tier 2 was run on it
+through the recording wrapper (tier2diag.annotate_saving): composite **0.760839**, digest c829ed334440a0f9,
+deterministic: True, 2469 s. It is bit-identical to batch 4's confirmation: the wrapper changes nothing, and
+the confirmed state reproduces across sessions. Logged as a `confirm` row (no regression).
+
+The recording (tier2diag, every dev image; explained against OD_obs; keep = target_keep; discs = the
+observable junction discs):
+
+| image | explained | ex thin / mid / wide / vwide | keep thin / mid / wide / vwide | target_keep | disc median / p10 / < 0.5 | SSR share vwide |
+|---|---|---|---|---|---|---|
+| s000 average | 0.981 | 0.976 / 0.970 / 0.976 / 0.987 | 0.93 / 0.95 / 0.93 / 0.96 | 0.953 | 0.977 / 0.859 / 0.00 | 0.41 |
+| s000 frame | 0.961 | 0.939 / 0.931 / 0.939 / 0.973 | 0.97 / 0.94 / 0.92 / 0.96 | 0.949 | 0.955 / 0.809 / 0.04 | 0.46 |
+| s004 average | 0.912 | 0.965 / 0.910 / 0.910 / 0.910 | 0.86 / 0.81 / 0.81 / 0.83 | 0.821 | 0.880 / 0.554 / 0.08 | 0.65 |
+| s004 frame | 0.898 | 0.949 / 0.892 / 0.894 / 0.900 | 0.82 / 0.79 / 0.79 / 0.82 | 0.808 | 0.819 / 0.453 / 0.15 | 0.66 |
+| s007 average | 0.989 | 0.965 / 0.983 / 0.984 / 0.992 | 0.95 / 0.97 / 0.96 / 0.97 | 0.969 | 0.981 / 0.887 / 0.02 | 0.44 |
+| s007 frame | 0.983 | 0.941 / 0.969 / 0.975 / 0.988 | 0.91 / 0.95 / 0.95 / 0.97 | 0.960 | 0.976 / 0.834 / 0.01 | 0.48 |
+| s008 average | 0.992 | 0.992 / 0.992 / 0.982 / 0.995 | 0.96 / 0.97 / 0.98 / 0.96 | 0.969 | 0.981 / 0.911 / 0.01 | 0.20 |
+| s008 frame | 0.982 | 0.989 / 0.978 / 0.958 / 0.992 | 0.95 / 0.96 / 0.96 / 0.96 | 0.958 | 0.956 / 0.845 / 0.00 | 0.15 |
+| pathologic average | 0.757 | 0.822 / 0.708 / 0.784 / 0.755 | 0.76 / 0.57 / 0.65 / 0.67 | 0.656 | 0.741 / 0.229 / 0.27 | 0.64 |
+| pathologic frame | 0.735 | 0.790 / 0.666 / 0.791 / 0.728 | 0.88 / 0.53 / 0.66 / 0.64 | 0.636 | 0.682 / 0.197 / 0.32 | 0.71 |
+
+What it shows (answering the review's finding):
+- The images split in two. On s000, s007 and s008 the target keeps 95-97 % of the true OD and the render
+  explains 0.96-0.99 in every width class; the pooled number is honest there, and the remaining error is in
+  the worst junction discs (10th percentile 0.81-0.91). On s004 (keep 0.81-0.82) and pathologic (keep
+  0.64-0.66) the target itself has lost 18-36 % of the true OD to the background, in EVERY width class, and
+  explained follows it. The worst discs (p10 0.45-0.55 on s004, 0.20-0.23 on pathologic) are where tier 2
+  hides its error; the pooled explained_junction does not show them.
+- The very wide class holds 41-71 % of the squared residual everywhere except s008.
+- So the review's direction is right and is now measured: the biggest remaining render gap on the hard
+  images is the TARGET (stage 1's leak), not the fit. E17 (EM retarget) raised target_fidelity on every
+  crop but the radius absorbed the recovered flank OD; the pathologic leak is a very wide structure that no
+  render support covers.
+
+### Batch 5 summary
+
+| # | commit | change | tier-1 composite | fast | graph | pos | width | explained | expl_junction | probe_score | status | prediction held? |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E14 | ffc8257 | (batch 4, confirmed) | 0.788423 | 0.6996 | 0.633 | 0.749 | 0.760 | 0.791 | 0.795 | 0.877 | - | - |
+| P1 | 63583c8 | tier2diag (width classes, discs, target_keep) | (pipeline unchanged) | | | | | | | | diagnostic | review finding confirmed and measured |
+| E15 | 17b9c24 | type untyped nodes from their fitted arms | 0.788423 | 0.6996 | 0.633 | 0.749 | 0.760 | 0.791 | 0.795 | 0.877 | discard (equal) | partly: identical; exact types only |
+| E16 | 167f2fb | CFAR test for re-proposed arms | 0.787676 | 0.6981 | 0.630 | 0.747 | 0.761 | 0.792 | 0.796 | 0.877 | discard (-0.0008) | no: more permissive than MDL |
+| E17 | 10d3d2d | two retarget / final-fit alternations (EM) | 0.789640 | 0.6998 | 0.633 | 0.749 | 0.755 | 0.797 | 0.802 | 0.879 | discard (+0.0012) | partly: explained, fidelity up; width down |
+
+**Tier 2:** 0.760839 (unchanged E14 pipeline, confirmed again; digest c829ed334440a0f9, deterministic).
+
+**Tuning curves.** Nothing was kept, so the thresholds and sweep means are E14's. In the discarded runs:
+E15 and E16 left every probe digest-identical; E17 moved the width sweep mean 0.831 -> 0.853 and
+crossing_width 0.907 -> 0.919 (fuller target on thin lines; line_d2.5 0.64 -> 0.73), fork -0.004.
+
+**What the batch taught.**
+1. Junction typing is not a labelling problem of the re-proposed nodes (E15): no untyped degree-4 node
+   pairs into a crossing, and the coarse confusion is on proposal-typed junctions (truth compound typed
+   crossing 53 / 3-way 60, truth 3-way typed crossing 37 over both tier-2 runs). The typing errors start in
+   neuromimetic stage 7's clustering of events, which the fit never revisits.
+2. A CFAR null must match the context of the hypothesis (E16): the vessel-free background is quieter than
+   the residual next to fitted vessels, so a background-calibrated criterion is more liberal than the MDL
+   cost, not more conservative. The arms' false alarms are misfit echoes of their parents.
+3. The target is the ceiling on the hard images (tier2diag): s004 and pathologic lose 18-36 % of the true
+   OD to the background before any fit, uniformly across widths. An EM retarget recovers part of it (E17,
+   target_fidelity up on 10/10 crops) but the profile model turns the recovered flank OD into radius.
+
+**Directions for the next batch (ranked).**
+1. E17 with the radius held: alternate retarget and fit, but in the second round fit only a (contrast),
+   the halo and kappa, with r and s frozen at the first round's values (or anchored at their calibre). That
+   keeps the explained / target_fidelity gain without the width loss. Judge on tier 2 with tier2diag
+   (target_keep on s004 and pathologic).
+2. A context-matched null for re-proposed arms: translate each arm's template ALONG its parent's flank
+   (same distance to the parent's centreline, same side, outside the arm's own footprint) and accept above
+   that null. This is the CFAR that E16 should have been; the multi-seed controls are its test.
+3. Very wide structures in pathologic (keep 0.64-0.66; vwide 64-71 % of the SSR): a coarse channel (scale
+   > 24 px) in the proposal, or a background-leak test on the residual at a coarse scale, before arms
+   matter there.
+4. Junction typing from the fitted render (the confusion above): re-type a proposal junction after the
+   fit from the fitted arms' pairing AND the union/additive misfit at the node (a crossing fitted as a node
+   leaves an over-predicted centre; a fork fitted as a crossing an under-predicted one). Pre-register on the
+   tier-2 confusion counts.
+5. Recommend (unchanged) the evaluator re-baseline that averages the battery over imaging seeds.

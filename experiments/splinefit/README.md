@@ -65,6 +65,11 @@ VESSELMAP_COMPILE=0): its per-shape cache made an image's floats depend on the i
 cross_a45) with imaging seeds 1-7 and reports the mean probe_composite per stimulus: the battery uses ONE
 imaging draw (seed 11), so a change that moves probes must also move these controls to count as real
 (`python -m experiments.splinefit.controls`, ~4 min).
+`tier2diag.py` breaks the whole-image residual down by true vessel-width class and per junction disc and
+measures target_keep, the fraction of the true OD the pipeline's own target keeps (the background leak).
+Record during tier 2 with `DIAG2_RUN=<name> python -m experiments.splinefit.run_experiment --tier 2
+--pipeline experiments.splinefit.tier2diag:annotate_saving` (the output, digests and metric are unchanged),
+then `python -m experiments.splinefit.tier2diag --run <name> [--compare <other>]`.
 
 Since batch 4 the fit re-proposes ARMS from its own prediction error (`repropose.py`, after the MDL prune):
 neuromimetic stages 3-6 on max(OD - R, 0), kept when novel (outside the render's support) and attached to an
