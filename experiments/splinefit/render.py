@@ -5,8 +5,9 @@ centreline with r (half width), s (blur) and a (centre OD) profile splines; a pi
 a_e P(d; r_e, s_e) T_e, P the cylinder chord (6 nested boxes) blurred by a Gaussian in closed form (erf), T_e
 end caps that fade along the axis with the same blur; the edges' contributions are summed, an image-wide halo
 (1 - h) delta + h G(s_h) is applied, and a smooth background grid (bicubic, 64 px) is subtracted:
-pred = bg - OD_render. Here the target is -OD (OD = B - log I of neuromimetic stage 1, the image cleaned by a
-background fitted on the vesselness mask's negative), so bg is only a small, regularised correction.
+pred = bg - OD_render. Here the target is -OD (OD = B - log I, the image cleaned by a background fitted on the
+vesselness mask's negative, fit.py), so bg is at most a small, regularised correction (frozen at 0 by
+default).
 
 What the plain sum gets wrong, and this module adds: the render is exact for vessels that do not touch, but
 * at a fork / confluence (a node) the lumens of the edges meeting there are ONE blood volume: the chord at a
@@ -27,12 +28,16 @@ renders there before its blur, and cap_m the same lumen closed by a round (hemis
 union of the members covers the node; passing members and crossing members have no end. D vanishes where the
 lumens do not overlap, so the correction blurred to the site's blur, G(sqrt(s^2 - s0^2)) * D, is local and
 has no seams; it is multiplied by a window (1 inside the overlap reach, cosine taper outside) and added to the
-summed sharp-core image before the halo. kappa (crossing additivity) is one parameter per image (initial 0.87).
+summed sharp-core image before the halo. Cost: D is evaluated only where a member's sharp lumen reaches
+(r + 3 s0 + ENT_MARGIN px), and the site blurs, quantised to 10 % steps (SIG_LEVEL), are one image-wide
+OpenCV Gaussian per level; the site blur takes no gradient (it follows the members' s). kappa (crossing
+additivity) is one parameter per image (initial 0.87).
 Nodes closer than their lumens' reach are one site (a compound region): an edge between two of them is
 capped at both ends.
 
 Sites are re-detected at every rebuild (no gradient): nodes of degree >= 2 from the topology, crossings from
-the geometry (centreline samples of two edges within 1 px of each other, away from any node they share), so
+the geometry (centreline samples of two edges within 1 px of each other, running >= CROSS_MIN_DEG apart, away
+from any node they share), so
 the same renderer serves a proposal, a pruned network and an oracle (true) network.
 """
 from __future__ import annotations
@@ -47,21 +52,17 @@ from scipy.spatial import cKDTree
 from . import use_vesselmap
 
 use_vesselmap()
-from vesselmap.render import NetworkModel, profile          # noqa: E402
+from vesselmap.render import NetworkModel, gaussian_blur, profile          # noqa: E402
 
 SQRT2 = math.sqrt(2.0)
 S0 = 0.5                    # px, blur of the 'sharp' domain in which lumens are unioned
 KAPPA0 = 0.87               # crossing additivity (vesselscene docs/reference.md, measured on real crossings)
 R_SITE_MAX = 40.0           # px, largest overlap reach of a site
+SIG_LEVEL = 0.1             # site blurs are quantised to exp(k SIG_LEVEL) px (one image blur per level)
 TAPER = 4.0                 # px, cosine taper of a site's window beyond its reach
 CROSS_D = 1.0               # px, centreline samples of two edges this close make a crossing
-
-
-def _gauss_kernels(sig: torch.Tensor, half: int) -> torch.Tensor:
-    """(n, 2 half + 1) normalised 1-D Gaussians of std sig (differentiable in sig)."""
-    x = torch.arange(-half, half + 1, dtype=sig.dtype)
-    k = torch.exp(-0.5 * (x[None, :] / sig[:, None]) ** 2)
-    return k / k.sum(1, keepdim=True)
+CROSS_MIN_DEG = 15.0        # ... running at least this far apart in direction (else a duplicate, not a crossing)
+ENT_MARGIN = 3.0            # px, slack of a site entry's reach (the geometry moves between rebuilds)
 
 
 class JunctionModel(NetworkModel):
@@ -85,8 +86,7 @@ class JunctionModel(NetworkModel):
     # ------------------------------------------------------------ sites
     def rebuild(self):
         super().rebuild()
-        if getattr(self, "junctions", True):
-            self._build_sites()
+        self._build_sites()                            # also without the correction: crossings are reported
 
     @torch.no_grad()
     def _build_sites(self):
@@ -155,6 +155,8 @@ class JunctionModel(NetworkModel):
                 p = 0.5 * (C[a] + C[b])
                 if any(q[0] == (min(ka, kb), max(ka, kb)) and np.hypot(*(q[1] - p)) < 8.0 for q in seen):
                     continue
+                if abs(float(T[a, 0] * T[b, 1] - T[a, 1] * T[b, 0])) < math.sin(math.radians(CROSS_MIN_DEG)):
+                    continue
                 shared = ends_of[ka] & ends_of[kb]
                 reach = R[a] + R[b] + 3 * max(S[a], S[b]) + 8.0
                 if any(np.hypot(*(self.node_xy[nidx[n]].numpy() - p)) < reach for n in shared if n in nidx):
@@ -187,15 +189,17 @@ class JunctionModel(NetworkModel):
                 j = int(np.argmin(d))
                 t = T[a0 + j]
                 if c0 and not c1:
-                    dirs.append((t, R[a0 + j]))
+                    dirs.append((t, R[a0 + j], k))
                 elif c1 and not c0:
-                    dirs.append((-t, R[a0 + j]))
+                    dirs.append((-t, R[a0 + j], k))
                 else:
-                    dirs.append((t, R[a0 + j]))
-                    dirs.append((-t, R[a0 + j]))
+                    dirs.append((t, R[a0 + j], k))
+                    dirs.append((-t, R[a0 + j], k))
             reach = rmax + 2.0
             for i in range(len(dirs)):
                 for j in range(i + 1, len(dirs)):
+                    if dirs[i][2] == dirs[j][2]:
+                        continue                       # a member does not overlap itself
                     cosang = float(np.clip(np.dot(dirs[i][0], dirs[j][0]), -1, 1))
                     th = math.acos(cosang)
                     if kind == "cross":
@@ -224,11 +228,15 @@ class JunctionModel(NetworkModel):
                 if not len(keep):
                     continue
                 dd, jj = cKDTree(C[a0 + keep]).query(pix_xy[rows_here])
-                ent_row.append(nrow + rows_here)
-                ent_col.append(np.full(len(rows_here), col))
-                ent_samp.append(a0 + keep[jj])
-                ent_cap0.append(np.full(len(rows_here), bool(c0)))
-                ent_cap1.append(np.full(len(rows_here), bool(c1)))
+                # the sharp (s0) lumen is zero beyond r + 3 s0: only pixels that close (plus the motion
+                # allowed between two rebuilds) carry an entry
+                near = dd <= R[a0 + keep[jj]] + 3.0 * S0 + ENT_MARGIN
+                rh = rows_here[near]
+                ent_row.append(nrow + rh)
+                ent_col.append(np.full(len(rh), col))
+                ent_samp.append(a0 + keep[jj[near]])
+                ent_cap0.append(np.full(len(rh), bool(c0)))
+                ent_cap1.append(np.full(len(rh), bool(c1)))
             row_pix.append(np.where(inside, py * W + px, -1))
             row_win.append(win)
             row_site.append(np.full(n_local, si))
@@ -238,7 +246,9 @@ class JunctionModel(NetworkModel):
             site_kind.append(kind)
             nrow += n_local
             self.site_info.append(dict(kind=kind, x=float(c[0]), y=float(c[1]), half=half, reach=float(reach),
-                                       edges=[int(self.eids[k]) for k, *_ in loc]))
+                                       edges=[int(self.eids[k]) for k, *_ in loc],
+                                       centres=[(float(q[0]), float(q[1])) for q in cents],
+                                       core=float(rmax + 2.0 * smax)))
         cat = lambda L, dt: torch.tensor(np.concatenate(L) if L else np.zeros(0), dtype=dt)
         self.s_ent_row = cat(ent_row, torch.long)
         self.s_ent_col = cat(ent_col, torch.long)
@@ -259,13 +269,22 @@ class JunctionModel(NetworkModel):
         self.s_kind_cross = torch.tensor([k == "cross" for k in site_kind], dtype=torch.bool)
         self.s_rows = site_rows
         self.s_samp = site_samp
-        # buckets of equal patch size, so each blur is one grouped convolution
-        bk = {}
+        # the rows any member reaches (D is zero elsewhere), their site, pixel, window and kind
+        er = self.s_ent_row.numpy()
+        urow, inv = np.unique(er, return_inverse=True)
+        rsite = np.zeros(max(nrow, 1), np.int64)
         for si, (r0, half) in enumerate(site_rows):
-            bk.setdefault(half, []).append(si)
-        self.s_buckets = [(half, torch.tensor(sorted(v), dtype=torch.long),
-                           torch.tensor([site_rows[s][0] for s in sorted(v)], dtype=torch.long))
-                          for half, v in sorted(bk.items())]
+            rsite[r0:r0 + (2 * half + 1) ** 2] = si
+        self.s_urow = torch.tensor(urow, dtype=torch.long)
+        self.s_ent_u = torch.tensor(inv.reshape(-1), dtype=torch.long)
+        self.s_usite = torch.tensor(rsite[urow], dtype=torch.long)
+        upix = rp[urow] if len(urow) else np.zeros(0, int)
+        self.s_uin = torch.tensor(upix >= 0, dtype=torch.bool)
+        self.s_upix = torch.tensor(np.maximum(upix, 0), dtype=torch.long)
+        self.s_uwin = self.s_row_win[self.s_urow]
+        self.s_ucross = self.s_kind_cross[self.s_usite] if len(site_kind) else torch.zeros(0, dtype=torch.bool)
+        self.s_samp_flat = torch.tensor([j for v in site_samp for j in v], dtype=torch.long)
+        self.s_samp_site = torch.tensor([si for si, v in enumerate(site_samp) for _ in v], dtype=torch.long)
         self._sites_ready = True
 
     # ------------------------------------------------------------ the correction image
@@ -293,46 +312,28 @@ class JunctionModel(NetworkModel):
         step = torch.where(c0, step * 0.5 * torch.erfc(-along / (SQRT2 * S0)), step)
         step = torch.where(c1, step * 0.5 * torch.erfc((along - Lk) / (SQRT2 * S0)), step)
         butt = Aj * profile(d, Rj, s0) * step
-        n, m = self.s_n_rows, self.s_ncol
-        M_cap = torch.zeros(n, m).index_put((self.s_ent_row, self.s_ent_col), cap)
-        M_butt = torch.zeros(n, m).index_put((self.s_ent_row, self.s_ent_col), butt)
-        mx = M_cap.max(1).values
-        sm = M_butt.sum(1)
+        nu = len(self.s_urow)
+        mx = torch.zeros(nu).scatter_reduce(0, self.s_ent_u, cap, reduce="amax", include_self=True)
+        sm = torch.zeros(nu).index_add(0, self.s_ent_u, butt)
         kap = self.kappa()
-        # per-row kind: rows of crossing sites take -(1 - kappa)(sum - max), node rows max - sum
-        rk = self._row_cross()
-        D = torch.where(rk, -(1.0 - kap) * (sm - mx), mx - sm) * self.s_row_win
-        # site blur: sqrt(mean member blur^2 - s0^2)
-        out = []
-        for half, sids, r0s in self.s_buckets:
-            P = 2 * half + 1
-            sig = []
-            for si in sids.tolist():
-                sj = torch.tensor(self.s_samp[si], dtype=torch.long)
-                sig.append(torch.sqrt(torch.clamp((S[sj] ** 2).mean() - S0 * S0, min=0.04)))
-            sig = torch.stack(sig)
-            idx = r0s[:, None] + torch.arange(P * P)[None, :]
-            patches = D[idx].view(len(sids), 1, P, P)
-            kh = int(min(half, math.ceil(3.0 * float(sig.max().detach())) + 1))
-            K = _gauss_kernels(sig, kh)
-            x = patches.view(1, len(sids), P, P)
-            x = F.conv2d(x, K.view(len(sids), 1, 1, -1), padding=(0, kh), groups=len(sids))
-            x = F.conv2d(x, K.view(len(sids), 1, -1, 1), padding=(kh, 0), groups=len(sids))
-            out.append((idx.reshape(-1), x.reshape(-1)))
-        ridx = torch.cat([o[0] for o in out])
-        val = torch.cat([o[1] for o in out])
-        pix = self.s_row_pix[ridx]
-        ok = pix >= 0
-        return V.index_add(0, pix[ok], val[ok])
-
-    def _row_cross(self):
-        if getattr(self, "_rk", None) is None or self._rk[0] is not self.s_row_win:
-            rk = torch.zeros(self.s_n_rows, dtype=torch.bool)
-            for si, (r0, half) in enumerate(self.s_rows):
-                if bool(self.s_kind_cross[si]):
-                    rk[r0:r0 + (2 * half + 1) ** 2] = True
-            self._rk = (self.s_row_win, rk)
-        return self._rk[1]
+        # crossing rows take -(1 - kappa)(sum - max), node rows max - sum; zero where no member reaches
+        D = torch.where(self.s_ucross, -(1.0 - kap) * (sm - mx), mx - sm) * self.s_uwin
+        # site blur sqrt(mean member blur^2 - s0^2) (no gradient through it), quantised to 10 % levels: each
+        # level is one image-wide Gaussian blur (OpenCV, vesselmap's gaussian_blur) of its sites' D
+        with torch.no_grad():
+            ns = len(self.s_rows)
+            s2 = torch.zeros(ns).index_add(0, self.s_samp_site, S[self.s_samp_flat] ** 2)
+            cnt = torch.zeros(ns).index_add(0, self.s_samp_site, torch.ones(len(self.s_samp_site)))
+            sig = torch.sqrt(torch.clamp(s2 / cnt.clamp(min=1) - S0 * S0, min=0.04))
+            lev = torch.round(torch.log(sig) / SIG_LEVEL).long()
+        ulev = lev[self.s_usite]
+        for L in sorted(set(lev.tolist())):
+            sel = (ulev == L) & self.s_uin
+            if not bool(sel.any()):
+                continue
+            img = torch.zeros(self.H * self.W).index_add(0, self.s_upix[sel], D[sel])
+            V = V + gaussian_blur(img.view(self.H, self.W), math.exp(L * SIG_LEVEL)).reshape(-1)
+        return V
 
     # ------------------------------------------------------------ rendering (overrides)
     def vessel_image(self, entries=None):

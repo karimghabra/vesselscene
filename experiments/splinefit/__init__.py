@@ -1,4 +1,4 @@
-"""Spline-network fitting of whole vesselscene stills (README.md when written).
+"""Spline-network fitting of whole vesselscene stills (README.md; the loop's charter: program.md).
 
 The neuromimetic annotator (experiments.neuromimetic) PROPOSES vessels and junctions; this package turns the
 proposal into a spline network (centreline B-splines with radius, blur and contrast profiles, nodes at forks
@@ -8,7 +8,13 @@ mask's negative; never a vesselness map).
 
 Modules: proposals (neuromimetic proposal -> initial network), render (the junction-aware renderer, a
 subclass of LIMBUS vesselmap's NetworkModel), fit (joint optimisation and MDL pruning), pipeline (the
-harness entry point annotate(image, valid)).
+harness entry point annotate(image, valid)).  The frozen evaluator (program.md, check_frozen, frozen.json):
+score (the metric), fastset (the fast tier's crops, fastset.json), probes (the psychophysics battery,
+probe_battery.json), run_experiment (one experiment on tier 1 or 2), evaluate_fit (reference rows), tests
+(the scorer's known answers).  Diagnostic: residuals (the residual at the truth's junctions).  ORACLE
+diagnostics (truth-initialised, never in the pipeline): oracle (the fit started from the true network, the
+positive control; the true network through the junction-aware render, the render model's ceiling).
+Results: results/dev/<name>/ (evaluate_fit tables and the baseline's figures).
 """
 from __future__ import annotations
 

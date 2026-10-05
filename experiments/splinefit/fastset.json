@@ -1,0 +1,129 @@
+{
+ "note": "fast tier: crops of the dev scenes (fastset.py); frozen with score.py",
+ "size": 256,
+ "stride": 32,
+ "min_valid": 0.97,
+ "max_iou": 0.25,
+ "crops": [
+  {
+   "scene": "healthy_s000_480x768",
+   "kind": "average",
+   "crop": [
+    224,
+    32,
+    256,
+    256
+   ],
+   "junctions": 26,
+   "lumen_px": 32661
+  },
+  {
+   "scene": "healthy_s000_480x768",
+   "kind": "frame",
+   "crop": [
+    128,
+    128,
+    256,
+    256
+   ],
+   "junctions": 25,
+   "lumen_px": 28752
+  },
+  {
+   "scene": "healthy_s004_320x512",
+   "kind": "average",
+   "crop": [
+    64,
+    0,
+    256,
+    256
+   ],
+   "junctions": 33,
+   "lumen_px": 37215
+  },
+  {
+   "scene": "healthy_s004_320x512",
+   "kind": "frame",
+   "crop": [
+    224,
+    0,
+    256,
+    256
+   ],
+   "junctions": 30,
+   "lumen_px": 41670
+  },
+  {
+   "scene": "healthy_s007_480x768",
+   "kind": "average",
+   "crop": [
+    0,
+    0,
+    256,
+    256
+   ],
+   "junctions": 18,
+   "lumen_px": 31016
+  },
+  {
+   "scene": "healthy_s007_480x768",
+   "kind": "frame",
+   "crop": [
+    96,
+    192,
+    256,
+    256
+   ],
+   "junctions": 20,
+   "lumen_px": 32826
+  },
+  {
+   "scene": "healthy_s008_480x768",
+   "kind": "average",
+   "crop": [
+    0,
+    224,
+    256,
+    256
+   ],
+   "junctions": 28,
+   "lumen_px": 34337
+  },
+  {
+   "scene": "healthy_s008_480x768",
+   "kind": "frame",
+   "crop": [
+    96,
+    128,
+    256,
+    256
+   ],
+   "junctions": 17,
+   "lumen_px": 27870
+  },
+  {
+   "scene": "pathologic_s000_480x768",
+   "kind": "average",
+   "crop": [
+    0,
+    128,
+    256,
+    256
+   ],
+   "junctions": 13,
+   "lumen_px": 47212
+  },
+  {
+   "scene": "pathologic_s000_480x768",
+   "kind": "frame",
+   "crop": [
+    352,
+    96,
+    256,
+    256
+   ],
+   "junctions": 12,
+   "lumen_px": 52205
+  }
+ ]
+}

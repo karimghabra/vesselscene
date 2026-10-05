@@ -14,7 +14,8 @@ them into the network the renderer fits:
   the parent vessel continues, the branch ends on it), the rest end at the node;
 * free ends (no junction, or a junction left with one end) become degree-1 nodes;
 * each chain of pieces linked through crossings, joints and through-nodes is one edge: a clamped cubic
-  B-spline whose control spacing vesselmap adapts to calibre and curvature (`spacing_for_path`), with r, s, a
+  B-spline whose control spacing vesselmap adapts to calibre and curvature (`spacing_for_path`, tolerance
+  SPACING_TOL x calibre), with r, s, a
   profile splines from the proposal's cleaned-OD cross-sections, converted from the blurred box to vesselmap's
   blurred cylinder chord (half width x `BOX_TO_CYL`, contrast divided by the cylinder's blurred peak).
 
@@ -29,12 +30,13 @@ import numpy as np
 from . import use_vesselmap
 
 use_vesselmap()
-from vesselmap.network import VesselNetwork                     # noqa: E402
+from vesselmap.network import VesselNetwork, pos_spacing_for, spacing_for_path   # noqa: E402
 
 BOX_TO_CYL = 1.2            # a blurred box of half width r ~ a cylinder chord of half width 1.2 r (FWHM / area)
 CROSS_TURN_DEG = 45.0       # a crossing's paired ends must continue each other within this turn
 CONT_TURN_DEG = 40.0        # a trace continuing through a node within this turn is one edge (parent)
 JOINT_TURN_DEG = 60.0       # two ends at a junction left with two: one vessel when they turn less
+SPACING_TOL = 0.15          # x calibre (r + s): how closely a spline must follow its trace
 END_LOOK_PX = 8.0           # px along an edge for its end direction
 
 
@@ -219,7 +221,12 @@ def build_network(prop: dict, shape) -> tuple[VesselNetwork, dict]:
         info = dict(band=band, source="neuromimetic")
         if thr:
             info["through"] = thr
-        eid = net.add_edge_dense(xy, rc, sc, ac, u=u, v=v, info=info)
+        # control spacing: the largest (<= vesselmap's calibre bound) whose spline follows the trace within
+        # SPACING_TOL x calibre (at least 0.6 px): a wide vessel's trace wobbles by a fraction of its width,
+        # and a spline following the wobble folds its nearest-sample render (radial streaks)
+        wd = float(np.median(rc) + np.median(sc))
+        spacing = spacing_for_path(xy, pos_spacing_for(wd), tol=max(0.6, SPACING_TOL * wd))
+        eid = net.add_edge_dense(xy, rc, sc, ac, u=u, v=v, info=info, spacing=spacing)
         for k, _ in pieces:
             piece_edge[k] = eid
     # edges ending at a through node must end on its (moved) position

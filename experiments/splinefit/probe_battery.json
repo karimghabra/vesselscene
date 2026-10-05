@@ -1,0 +1,1372 @@
+{
+ "version": "probes-v1",
+ "seed": 11,
+ "shape": [
+  128,
+  128
+ ],
+ "k": 4.0,
+ "z_focus": 10.0,
+ "defocus": 0.06,
+ "focus_spread": 3.0,
+ "note": "psychophysics probe battery (probes.py); frozen with score.py",
+ "geometries": {
+  "line_d2.5": {
+   "geom": "line",
+   "args": {
+    "r_px": 1.25
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 51.8,
+     "n_runs": 2
+    }
+   }
+  },
+  "line_d3": {
+   "geom": "line",
+   "args": {
+    "r_px": 1.5
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 75.7,
+     "n_runs": 3
+    }
+   }
+  },
+  "line_d6": {
+   "geom": "line",
+   "args": {
+    "r_px": 3.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    }
+   }
+  },
+  "line_d12": {
+   "geom": "line",
+   "args": {
+    "r_px": 6.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.0,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.0,
+     "n_runs": 1
+    }
+   }
+  },
+  "line_d6_f25": {
+   "geom": "line",
+   "args": {
+    "r_px": 3.0
+   },
+   "focus": 25.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 132.5,
+     "n_runs": 1
+    }
+   }
+  },
+  "line_d6_f50": {
+   "geom": "line",
+   "args": {
+    "r_px": 3.0
+   },
+   "focus": 50.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 103.6,
+     "n_runs": 2
+    }
+   }
+  },
+  "line_d6_h0.5": {
+   "geom": "line",
+   "args": {
+    "r_px": 3.0,
+    "hct": 0.5
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 68.7,
+     "n_runs": 4
+    }
+   }
+  },
+  "line_d6_h0.25": {
+   "geom": "line",
+   "args": {
+    "r_px": 3.0,
+    "hct": 0.25
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 0.0,
+     "n_runs": 0
+    }
+   }
+  },
+  "line_d5_f25_h0.5": {
+   "geom": "line",
+   "args": {
+    "r_px": 2.5,
+    "hct": 0.5
+   },
+   "focus": 25.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 134.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 33.9,
+     "n_runs": 2
+    }
+   }
+  },
+  "fork_thin": {
+   "geom": "fork",
+   "args": {
+    "r0": 2.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 229.0,
+     "n_runs": 3
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 182.0,
+     "n_runs": 7
+    }
+   }
+  },
+  "fork_wide": {
+   "geom": "fork",
+   "args": {
+    "r0": 6.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 229.0,
+     "n_runs": 3
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 229.0,
+     "n_runs": 3
+    }
+   }
+  },
+  "fork_asym": {
+   "geom": "fork",
+   "args": {
+    "r0": 6.0,
+    "r1": 5.5
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 204.0,
+     "n_runs": 3
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 204.0,
+     "n_runs": 3
+    }
+   }
+  },
+  "fork_acute": {
+   "geom": "fork",
+   "args": {
+    "r0": 4.0,
+    "th1": 15.0,
+    "th2": 15.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 199.0,
+     "n_runs": 3
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 199.0,
+     "n_runs": 3
+    }
+   }
+  },
+  "cross_a20": {
+   "geom": "crossing",
+   "args": {
+    "angle": 20.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 278.9,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 278.9,
+     "n_runs": 2
+    }
+   }
+  },
+  "cross_a30": {
+   "geom": "crossing",
+   "args": {
+    "angle": 30.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 297.9,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 297.9,
+     "n_runs": 2
+    }
+   }
+  },
+  "cross_a45": {
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 286.9,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 286.9,
+     "n_runs": 2
+    }
+   }
+  },
+  "cross_a90": {
+   "geom": "crossing",
+   "args": {
+    "angle": 90.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 261.0,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 261.0,
+     "n_runs": 2
+    }
+   }
+  },
+  "cross_a45_dz5": {
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0,
+    "z_b": 15.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 286.9,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 286.9,
+     "n_runs": 2
+    }
+   }
+  },
+  "cross_a45_dz50": {
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0,
+    "z_b": 60.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 286.9,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 277.9,
+     "n_runs": 3
+    }
+   }
+  },
+  "cross_a45_wide_over_thin": {
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0,
+    "r_a": 6.0,
+    "r_b": 1.5
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "crossing"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 286.4,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 1,
+     "observable_px": 130.0,
+     "n_runs": 1
+    }
+   }
+  },
+  "t_branch": {
+   "geom": "t_branch",
+   "args": {},
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "bifurcation"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 196.0,
+     "n_runs": 3
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 2,
+     "observable_px": 150.0,
+     "n_runs": 3
+    }
+   }
+  },
+  "pseudo_t": {
+   "geom": "pseudo_t",
+   "args": {},
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 1,
+     "types": [
+      "pseudo-T"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 184.8,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 1,
+     "observable_px": 130.0,
+     "n_runs": 1
+    }
+   }
+  },
+  "parallel_g1": {
+   "geom": "parallel",
+   "args": {
+    "r_px": 2.0,
+    "gap": 1.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 267.0,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 230.1,
+     "n_runs": 1
+    }
+   }
+  },
+  "parallel_g2": {
+   "geom": "parallel",
+   "args": {
+    "r_px": 2.0,
+    "gap": 2.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 269.0,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 3,
+     "types": [
+      "pseudo-T",
+      "pseudo-T",
+      "pseudo-T"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 231.1,
+     "n_runs": 4
+    }
+   }
+  },
+  "parallel_g3": {
+   "geom": "parallel",
+   "args": {
+    "r_px": 2.0,
+    "gap": 3.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 269.0,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 3,
+     "types": [
+      "crossing",
+      "pseudo-T",
+      "pseudo-T"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 231.1,
+     "n_runs": 3
+    }
+   }
+  },
+  "parallel_g5": {
+   "geom": "parallel",
+   "args": {
+    "r_px": 2.0,
+    "gap": 5.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 267.0,
+     "n_runs": 2
+    },
+    "frame": {
+     "n_junctions": 2,
+     "types": [
+      "crossing",
+      "pseudo-T"
+     ],
+     "n_dont_care": 0,
+     "observable_px": 229.1,
+     "n_runs": 3
+    }
+   }
+  },
+  "end_dive": {
+   "geom": "dive",
+   "args": {},
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 64.0,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 46.0,
+     "n_runs": 1
+    }
+   }
+  },
+  "end_blind": {
+   "geom": "blind_end",
+   "args": {},
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 90.0,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 67.0,
+     "n_runs": 2
+    }
+   }
+  },
+  "capillary": {
+   "geom": "line",
+   "args": {
+    "r_px": 2.4,
+    "cls": "capillary",
+    "deg": -14.0
+   },
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 132.5,
+     "n_runs": 1
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 102.6,
+     "n_runs": 2
+    }
+   }
+  },
+  "empty_average": {
+   "geom": "empty",
+   "args": {},
+   "focus": 0.0,
+   "glare": {
+    "average": 0,
+    "frame": 0
+   },
+   "observable": {
+    "average": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 0.0,
+     "n_runs": 0
+    },
+    "frame": {
+     "n_junctions": 0,
+     "types": [],
+     "n_dont_care": 0,
+     "observable_px": 0.0,
+     "n_runs": 0
+    }
+   }
+  }
+ },
+ "stimuli": [
+  {
+   "name": "line_d2.5",
+   "sweep": "width",
+   "x": 2.5,
+   "geom": "line",
+   "args": {
+    "r_px": 1.25
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "line_d2.5",
+   "sha_image": "29baa8b65bf90b70a67c16e06cf2187fa5f52112b0985db9f4d7a6b725e78031",
+   "sha_truth": "9eefe8be40bed55aab8d3ecf11d1c62575103f3d40a33fc32863329725920676"
+  },
+  {
+   "name": "line_d3",
+   "sweep": "width",
+   "x": 3.0,
+   "geom": "line",
+   "args": {
+    "r_px": 1.5
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "line_d3",
+   "sha_image": "c9d27a8b0f2041cdb7eba0ace25212971b2c23b0b3baafe83457526094cf46af",
+   "sha_truth": "009d38d8b3e71e288c29f2554b2424bc38d2df2e7346e66eaf1d8ad73191a5b8"
+  },
+  {
+   "name": "line_d6",
+   "sweep": "width",
+   "x": 6.0,
+   "geom": "line",
+   "args": {
+    "r_px": 3.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "line_d6",
+   "sha_image": "eac1faa7835485f26e91d0b940eee7408d95d613fed681efd452b440083bd3d6",
+   "sha_truth": "119dba67e550549cae2b538f80bd4f99dfb365f8b29afeee88d7911f319b505b"
+  },
+  {
+   "name": "line_d12",
+   "sweep": "width",
+   "x": 12.0,
+   "geom": "line",
+   "args": {
+    "r_px": 6.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "line_d12",
+   "sha_image": "c46a295dd6b58af41e806e8b66babe9b6934ac653c311add0edf9084606cb2dc",
+   "sha_truth": "db2b2df2b65405162fb2ce8adf49e5ab92acd411ad9c5f930044c5373e83290c"
+  },
+  {
+   "name": "line_d6_f25",
+   "sweep": "blur",
+   "x": 25.0,
+   "geom": "line",
+   "args": {
+    "r_px": 3.0
+   },
+   "kind": "average",
+   "focus": 25.0,
+   "folder": "line_d6_f25",
+   "sha_image": "796855ca2b0961e405320fb5d933c610f94ea03bd8a0f8b15b14a552ee7cd343",
+   "sha_truth": "3ee1918e24a7842f83dcf54da8e035a15a804f04205e63eedc1170124958f9d1"
+  },
+  {
+   "name": "line_d6_f50",
+   "sweep": "blur",
+   "x": 50.0,
+   "geom": "line",
+   "args": {
+    "r_px": 3.0
+   },
+   "kind": "average",
+   "focus": 50.0,
+   "folder": "line_d6_f50",
+   "sha_image": "72d9051915c552f3b0688bf275947916db99ac187c392851d926bcaa0ad77ce3",
+   "sha_truth": "c2cba0888b2af3af791cb0980b9c57d476d81a93aa2bd1b363e91b084aad4335"
+  },
+  {
+   "name": "line_d6_h0.5",
+   "sweep": "contrast",
+   "x": 0.5,
+   "geom": "line",
+   "args": {
+    "r_px": 3.0,
+    "hct": 0.5
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "line_d6_h0.5",
+   "sha_image": "ca4781d3f69807f0a54d7f656a9f6a8e7d07890e37a481cd88807668475d8fac",
+   "sha_truth": "79a64366008a33e5ed29602efbbe8bc6e8b8fb8be20eb65fdf7bcd2107885cf1"
+  },
+  {
+   "name": "line_d6_h0.25",
+   "sweep": "contrast",
+   "x": 0.25,
+   "geom": "line",
+   "args": {
+    "r_px": 3.0,
+    "hct": 0.25
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "line_d6_h0.25",
+   "sha_image": "bfaf8252bff9e1148b5295d76dd840bbbb1144203946dd593785a951c790a41c",
+   "sha_truth": "2eec99a2fb6bb52edda76751b161476fb17f4b39563ab613c163965405825085"
+  },
+  {
+   "name": "line_d5_f25_h0.5",
+   "sweep": "corner",
+   "x": "d5 f25 h0.5",
+   "geom": "line",
+   "args": {
+    "r_px": 2.5,
+    "hct": 0.5
+   },
+   "kind": "average",
+   "focus": 25.0,
+   "folder": "line_d5_f25_h0.5",
+   "sha_image": "58b99f49a9e909e81eb14ab81fe91273227a03dc0d58d12f2ff653288aa80943",
+   "sha_truth": "eb9a2a275b1ed5b35a7f2e879b89c65e3edc95f527c9eef409bf0e430d3e46f5"
+  },
+  {
+   "name": "fork_thin",
+   "sweep": "fork",
+   "x": "thin r0=2",
+   "geom": "fork",
+   "args": {
+    "r0": 2.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "fork_thin",
+   "sha_image": "b7d81de66b1309ba20d3cb04eb6eaff03d9a10a7d8825c848862da39c2cfa54c",
+   "sha_truth": "79cb468659a06b29968d98eca3fa130b193ea8d70bcb7e35c07e263546ac394e"
+  },
+  {
+   "name": "fork_wide",
+   "sweep": "fork",
+   "x": "wide r0=6",
+   "geom": "fork",
+   "args": {
+    "r0": 6.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "fork_wide",
+   "sha_image": "fb8bb1b793f7e4e290f51ff9cdf50adca80088d36bc0005dbf534a0a345fb8a2",
+   "sha_truth": "7bd5c0e0ae5597ab5b477fc54c485502b52f889199dfbeb9099752ab9d61f599"
+  },
+  {
+   "name": "fork_asym",
+   "sweep": "fork",
+   "x": "asym 6>5.5+3.7",
+   "geom": "fork",
+   "args": {
+    "r0": 6.0,
+    "r1": 5.5
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "fork_asym",
+   "sha_image": "948e6d2f8816591fbe9a1de062d16e050364fa11d3db317592b789dacb725327",
+   "sha_truth": "132bb042e3d5f3f911fb95687cdb6b4d623a11c12414e431eb36c292d94e89dd"
+  },
+  {
+   "name": "fork_acute",
+   "sweep": "fork",
+   "x": "acute 2x15deg",
+   "geom": "fork",
+   "args": {
+    "r0": 4.0,
+    "th1": 15.0,
+    "th2": 15.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "fork_acute",
+   "sha_image": "128a5d080ee061e6e4f535c2e2732be68ce29e3ad9d47dc31bbfe7e19aa5cb45",
+   "sha_truth": "11a5fc5244cd8e85753bf9efdb6d20cfad73d3375dd0eb84b4a950c2cfabb7ed"
+  },
+  {
+   "name": "fork_thin_frame",
+   "sweep": "fork",
+   "x": "thin frame",
+   "geom": "fork",
+   "args": {
+    "r0": 2.0
+   },
+   "kind": "frame",
+   "focus": 0.0,
+   "folder": "fork_thin",
+   "sha_image": "b01070359c996e47fee91021b58e7475a398840e9148aa148b3b52a42af16598",
+   "sha_truth": "7b67b0522395cb47266cc7cb40211fa82a31dfcb98afd4be40d4979e6427039c"
+  },
+  {
+   "name": "cross_a20",
+   "sweep": "crossing_angle",
+   "x": 20,
+   "geom": "crossing",
+   "args": {
+    "angle": 20.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "cross_a20",
+   "sha_image": "8263ab4029d3377d1a0c6f23a19dc248a00eaa0cb800b5a88cdd3d39054f76ab",
+   "sha_truth": "69a51c98e10de2da6a2e369c9b684c7e06dd23d4cf0ef5f41d31c17b6f9671e5"
+  },
+  {
+   "name": "cross_a30",
+   "sweep": "crossing_angle",
+   "x": 30,
+   "geom": "crossing",
+   "args": {
+    "angle": 30.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "cross_a30",
+   "sha_image": "ae3ff202af207286e7e8bb3a7671ed8e003b46e8f29319a99094245f51371f88",
+   "sha_truth": "e6cc0ebf2a7cf6908f356c60b382b5af63c34afd01c7933251a3eb5927b5f88d"
+  },
+  {
+   "name": "cross_a45",
+   "sweep": "crossing_angle",
+   "x": 45,
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "cross_a45",
+   "sha_image": "67e40cd2966c287a509e76539c463b7e013546af362c8a1dda7dd28466576e19",
+   "sha_truth": "815b17d6d0ffab4c4fc7cb6e97d77ad6f866790574f0bf70c4487e31ceb0d0d1"
+  },
+  {
+   "name": "cross_a90",
+   "sweep": "crossing_angle",
+   "x": 90,
+   "geom": "crossing",
+   "args": {
+    "angle": 90.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "cross_a90",
+   "sha_image": "4f43f15ee9b452d23bd9690d4a742ab8be1200c7fed0365e5ee9b6871d407604",
+   "sha_truth": "94308e6d4cb7a711ce5d6bdf775f50c2e0ccc9f0ec867899970ec990435cf9ca"
+  },
+  {
+   "name": "cross_a45_dz5",
+   "sweep": "crossing_depth",
+   "x": 5.0,
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0,
+    "z_b": 15.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "cross_a45_dz5",
+   "sha_image": "ee05bc4ff9f2a21527824925c1bc9a0a42bc67670d69ce8e9f59b69e6b6a8818",
+   "sha_truth": "dcdac17fa4cd1227d4ddb74fff6cd5c83bf28e57136b549820d3bb5d289a932b"
+  },
+  {
+   "name": "cross_a45_dz50",
+   "sweep": "crossing_depth",
+   "x": 50.0,
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0,
+    "z_b": 60.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "cross_a45_dz50",
+   "sha_image": "5e478de25c54d097b402dd25d2f18a8466a85e319bfe386b373640112399cd86",
+   "sha_truth": "53a0ad396f165dcaf4ce435c646c1da972bcc3decac7424abdcb26b3bdf8968b"
+  },
+  {
+   "name": "cross_a45_wide_over_thin",
+   "sweep": "crossing_width",
+   "x": "6 over 1.5",
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0,
+    "r_a": 6.0,
+    "r_b": 1.5
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "cross_a45_wide_over_thin",
+   "sha_image": "fb20a9e63fbd8547f609c559f939c0b2a9fd0695bfa4f011dd7a43bd8d77d361",
+   "sha_truth": "8a2f3164e51b65dc74159f7311b0d015c884afbf75a329e54458b6a94fa034ac"
+  },
+  {
+   "name": "cross_a45_frame",
+   "sweep": "crossing_angle",
+   "x": "45 frame",
+   "geom": "crossing",
+   "args": {
+    "angle": 45.0
+   },
+   "kind": "frame",
+   "focus": 0.0,
+   "folder": "cross_a45",
+   "sha_image": "9674bd72240e5d3379721cefc90582f864573f541c5df2a5182f3badb43dc831",
+   "sha_truth": "8a4c5fe4752fabe340abee5586ebb2ffc866d5237ebabd02a66993ffe63d081d"
+  },
+  {
+   "name": "t_branch",
+   "sweep": "t",
+   "x": "T branch",
+   "geom": "t_branch",
+   "args": {},
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "t_branch",
+   "sha_image": "bb6763c1e52f0bce11f24dcd6e3333977ba25e471039b06466c6ac2fc456134d",
+   "sha_truth": "f87db9379f41f376c45599d350c4c76aafb0c565c091201aa284640b68acaebb"
+  },
+  {
+   "name": "pseudo_t",
+   "sweep": "t",
+   "x": "pseudo-T",
+   "geom": "pseudo_t",
+   "args": {},
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "pseudo_t",
+   "sha_image": "a66e82692b776c9115c33d46032099a64d75a322da250cac58a8d26080e80e4a",
+   "sha_truth": "459dc27ce641cb6c33f5a1be29f404abb57b5ba01e1c80482634eba04e6fb240"
+  },
+  {
+   "name": "parallel_g1",
+   "sweep": "gap",
+   "x": 1.0,
+   "geom": "parallel",
+   "args": {
+    "r_px": 2.0,
+    "gap": 1.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "parallel_g1",
+   "sha_image": "bb3994539fb2828eb2b5ee3dcd846a7dd2608f6b6d45c5d4ba97f93ed7446828",
+   "sha_truth": "b1787367f93e75d277b5779995888f91e9dc38fd9e1c5a34e7edac49d3466ff1"
+  },
+  {
+   "name": "parallel_g2",
+   "sweep": "gap",
+   "x": 2.0,
+   "geom": "parallel",
+   "args": {
+    "r_px": 2.0,
+    "gap": 2.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "parallel_g2",
+   "sha_image": "bd901d4d76698d8b1b708a4923abe1137d07ba129022374d005ca7633f229555",
+   "sha_truth": "b6cc368a79430763335f36bbd362497d029f6b8ffeec1f249de075d2fb97bbf2"
+  },
+  {
+   "name": "parallel_g3",
+   "sweep": "gap",
+   "x": 3.0,
+   "geom": "parallel",
+   "args": {
+    "r_px": 2.0,
+    "gap": 3.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "parallel_g3",
+   "sha_image": "3c0e53a492b7804d87f6b2813b36db07fa67d0594d6598bdc1346c6cc4c33597",
+   "sha_truth": "053f765f783561825e4ca63c67aedc59115d9d511bda53b1a17ebd0774b21f51"
+  },
+  {
+   "name": "parallel_g5",
+   "sweep": "gap",
+   "x": 5.0,
+   "geom": "parallel",
+   "args": {
+    "r_px": 2.0,
+    "gap": 5.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "parallel_g5",
+   "sha_image": "e41715a621cd2742e30643d1ab62ac4389b0a8719e78a5085c7392ee0edf6ccb",
+   "sha_truth": "e39d26085ce3eb80b3abd93cb20238783d9c28c121c1a0e5dff9de09b34c57d2"
+  },
+  {
+   "name": "end_dive",
+   "sweep": "end",
+   "x": "dive",
+   "geom": "dive",
+   "args": {},
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "end_dive",
+   "sha_image": "b1ed60a62e56886935b62bab358269cc72ff71b46b9ce603cf870cf605f936e3",
+   "sha_truth": "d3c7ffac27acc694dbe59b3b20d5882e1237b05af417e655db30779e4a7ec5fa"
+  },
+  {
+   "name": "end_blind",
+   "sweep": "end",
+   "x": "blind end",
+   "geom": "blind_end",
+   "args": {},
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "end_blind",
+   "sha_image": "f2d098101a94f5ee7e16e2f4d57264474c6f084beab7eb8c94ee1cdfe6a704d5",
+   "sha_truth": "4501c95ee3454342c4173525131346940e496378f8343c831d589c567e2d6b8a"
+  },
+  {
+   "name": "capillary_frame",
+   "sweep": "rbc",
+   "x": "frame",
+   "geom": "line",
+   "args": {
+    "r_px": 2.4,
+    "cls": "capillary",
+    "deg": -14.0
+   },
+   "kind": "frame",
+   "focus": 0.0,
+   "folder": "capillary",
+   "sha_image": "c7e871b67bb1382ed0fffb39bd86bf9f6f43805dc1bd638458779542ae3d93fb",
+   "sha_truth": "c899ef193f79ec52f3bf3182fdec1e60594f3977659ef3ec309506bc1d986128"
+  },
+  {
+   "name": "capillary_average",
+   "sweep": "rbc",
+   "x": "average",
+   "geom": "line",
+   "args": {
+    "r_px": 2.4,
+    "cls": "capillary",
+    "deg": -14.0
+   },
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "capillary",
+   "sha_image": "b0c0f1b88e3ecd687a4cd09aaa989ad076704923a70752303568a0fd5889a7d2",
+   "sha_truth": "f276627cbc1971b4f6d304a961fd9bb5a7b0f9053fc0738484af8b9538eae7ef"
+  },
+  {
+   "name": "empty_average",
+   "sweep": "empty",
+   "x": "average",
+   "geom": "empty",
+   "args": {},
+   "kind": "average",
+   "focus": 0.0,
+   "folder": "empty_average",
+   "sha_image": "0c2e73ec9f74c545d8fbdf8638833b6248c0d9bb6ba2d72b9fb64b0c74855b19",
+   "sha_truth": "5ae5a11718f07e767fa838ded6051f78c67359e1dd1344525979dafb6fe50ab2"
+  },
+  {
+   "name": "empty_frame",
+   "sweep": "empty",
+   "x": "frame",
+   "geom": "empty",
+   "args": {},
+   "kind": "frame",
+   "focus": 0.0,
+   "folder": "empty_average",
+   "sha_image": "4ff311361624dd9c31bc1da852b6bdbff27ad16827c9590ef63bd557067473f5",
+   "sha_truth": "8744b3d2837f8cd728026cd3a57f49f469f29c0da911db62a4e1056c81508c32"
+  }
+ ]
+}
