@@ -35,7 +35,12 @@ def use_vesselmap():
 
 
 def set_threads(n: int = THREADS):
-    """Pin every numeric library to n threads (the machine is shared) and make torch deterministic."""
+    """Pin every numeric library to n threads (the machine is shared) and make torch deterministic.
+
+    vesselmap's torch.compile of its render core is switched off: with dynamic shapes it recompiles per
+    shape class and, past dynamo's cache limit, falls back to eager, so the floats of one image depended on
+    which images ran before it in the same process (batch-3 review). Eager is history-independent."""
+    os.environ["VESSELMAP_COMPILE"] = "0"
     os.environ.setdefault("OMP_NUM_THREADS", str(n))
     import cv2
     import torch
