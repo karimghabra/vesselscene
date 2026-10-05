@@ -39,7 +39,8 @@ Scores (per image):
     lie on their polyline's best truth edge (length-weighted; points within 2 TOL_PX of a truth edge end are
     left out, being shared by the edges meeting there);
   * runtime and a determinism digest of the output (with --repeat 2 or more, every run must give the same
-    digest; with one run determinism is not tested and is reported as None).
+    digest; with one run, or when the annotator reports ``from_cache``, determinism is not tested and is
+    reported as None).
 
 Usage:
     python -m experiments.neuromimetic.harness --annotator experiments.neuromimetic.baseline_hessian:annotate \
@@ -273,6 +274,8 @@ def run(annotator: str, scenes, kinds, repeat=1) -> list:
                     s[k] = v
             s.update(scene=os.path.basename(os.path.normpath(folder)), kind=kind, seconds=min(times), repeat=repeat,
                      digest=digests[0], deterministic=(len(set(digests)) == 1) if repeat >= 2 else None)
+            if out.get("from_cache"):                 # the runs replayed a cached result: nothing was tested
+                s["deterministic"] = None
             rows.append(s)
             print(json.dumps({k: (round(v, 4) if isinstance(v, float) else v) for k, v in s.items()}), flush=True)
     return rows

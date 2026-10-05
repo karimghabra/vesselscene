@@ -4,7 +4,9 @@
         --annotators experiments.neuromimetic.neuromimetic:annotate experiments.neuromimetic.baseline_hessian:annotate
 
 Writes <out>/<module>.<function>.json per annotator (harness.run rows and summary) and <out>/table.md: the
-mean and range over the scenes of each score, per image kind.
+mean and range over the scenes of each score, per image kind, in two tables (lines and edges; junctions and
+their types, with the majority-label and balanced-accuracy references next to the type accuracies).  An
+annotator whose JSON already exists in <out> is not run again.
 """
 from __future__ import annotations
 
@@ -16,37 +18,48 @@ import numpy as np
 
 from . import harness as H
 
-COLS = [("centreline_recall", "line R"), ("centreline_precision", "line P"), ("centreline_f1", "line F1"),
-        ("junction_recall", "junc R"), ("junction_precision", "junc P"), ("junction_f1", "junc F1"),
-        ("junction_type_accuracy_coarse", "type (coarse)"), ("junction_type_accuracy", "type (exact)"),
-        ("crossing_recall", "X R"), ("crossing_precision", "X P"), ("edge_cover", "edge cover"),
-        ("pieces_per_edge", "pieces/edge"), ("seconds", "s / image")]
+LINES = [("centreline_recall", "line R"), ("centreline_precision", "line P"), ("centreline_f1", "line F1"),
+         ("edge_cover", "edge cover"), ("pieces_per_edge", "pieces/edge"), ("polyline_purity", "purity"),
+         ("cost_seconds", "s / image")]
+JUNCS = [("junction_recall", "junc R"), ("junction_precision", "junc P"), ("junction_f1", "junc F1"),
+         ("junction_f1_strict", "junc F1 strict"), ("junction_type_accuracy_coarse", "type coarse"),
+         ("junction_type_majority_coarse", "coarse majority ref"), ("junction_type_balanced_coarse", "coarse balanced"),
+         ("junction_type_accuracy", "type exact"), ("junction_type_majority", "exact majority ref"),
+         ("crossing_recall", "X R"), ("crossing_precision", "X P")]
 
 
 def _cell(vals, key):
-    v = np.asarray([x for x in vals if x is not None and np.isfinite(x)], float)
+    v = np.asarray([x for x in vals if isinstance(x, (int, float)) and np.isfinite(x)], float)
     if not len(v):
         return "-"
-    fmt = "{:.0f}" if key == "seconds" else "{:.2f}"
+    fmt = "{:.0f}" if key == "cost_seconds" else "{:.2f}"
     if len(v) == 1 or np.ptp(v) == 0:
         return fmt.format(v.mean())
     return f"{fmt.format(v.mean())} ({fmt.format(v.min())}-{fmt.format(v.max())})"
 
 
+def _det(rr) -> str:
+    d = [r.get("deterministic") for r in rr]
+    if any(x is None for x in d):
+        return "not tested"
+    return "yes" if all(d) else "no"
+
+
 def table(results: dict, kinds) -> str:
+    """Two markdown tables per image kind: lines and edges, then junctions and their types.  's / image' is
+    the build time for a cached annotator (vesselmap's build_seconds), else the harness's run time."""
     out = []
     for kind in kinds:
-        out.append(f"\n**{kind}** (mean over scenes, range in brackets)\n")
-        out.append("| annotator | " + " | ".join(c[1] for c in COLS) + " | deterministic |")
-        out.append("|---" * (len(COLS) + 2) + "|")
-        for name, rows in results.items():
-            rr = [r for r in rows if r["kind"] == kind]
-            if not rr:
-                continue
-            det = "yes" if all(r["deterministic"] for r in rr) else "no"
-            if all(r.get("repeat", 2) == 1 for r in rr):
-                det = "not tested"
-            out.append(f"| {name} | " + " | ".join(_cell([r.get(k) for r in rr], k) for k, _ in COLS) + f" | {det} |")
+        for title, cols, det in (("lines and edges", LINES, True), ("junctions and types", JUNCS, False)):
+            out.append(f"\n**{kind}: {title}** (mean over scenes, range in brackets)\n")
+            out.append("| annotator | " + " | ".join(c[1] for c in cols) + (" | deterministic |" if det else " |"))
+            out.append("|---" * (len(cols) + 1 + det) + "|")
+            for name, rows in results.items():
+                rr = [dict(r, cost_seconds=r.get("build_seconds", r.get("seconds"))) for r in rows if r["kind"] == kind]
+                if not rr:
+                    continue
+                cells = " | ".join(_cell([r.get(k) for r in rr], k) for k, _ in cols)
+                out.append(f"| {name} | {cells}" + (f" | {_det(rr)} |" if det else " |"))
     return "\n".join(out) + "\n"
 
 

@@ -12,7 +12,8 @@ that do not pay for themselves (BIC / MDL).  This module only converts the input
   * junctions: nodes where at least 3 vessel segments meet (``net.degrees``: an edge passing through a node
     counts two).  3 -> 'pseudo-T' (the most frequent 3-way class of the truth; a still shows no flow
     direction), 4 or more -> 'crossing' when the arms pair into two near-collinear through lines, else
-    'compound' (``baseline_hessian.type_from_arms``, the same rule as the Hessian baseline);
+    'compound' (``baseline_hessian.type_from_arms``, the same rule as the Hessian baseline, without its node
+    merge).  Like that rule, it scores below the constant majority label on dev (harness typing references);
   * plus ``net.crossings()``: vesselmap does not make crossings nodes (an edge passes over another), so the
     points where two edges overlap without sharing a node are added as 'crossing', but only true X crossings:
     the two edges' tangents there must be transversal (``|cos| < CROSS_COS``), the point must be farther than
@@ -29,10 +30,10 @@ build_map takes minutes per image, so each network (``VesselNetwork.to_dict``, w
 MapConfig overrides) is cached under ``_cache/vesselmap/<key>.json``; the key hashes the image bytes, the
 MapConfig overrides and the vesselmap sources (``_key``), so a changed config or vesselmap gets its own entry.
 Later runs reuse it; the export above runs on the cached network every time, and the output carries
-``build_seconds`` and ``vesselmap_config`` (the harness copies both into its row; its ``seconds`` of a cached
-run is the export time).  vesselmap is not bit-reproducible (torch reductions on several threads), so a cached
-result is what makes a rerun identical: the harness's determinism check (``--repeat 2``) is only meaningful
-with the cache empty.
+``build_seconds``, ``vesselmap_config`` and ``from_cache`` (the harness copies them into its row; its
+``seconds`` of a cached run is the export time).  vesselmap is not bit-reproducible (torch reductions on several
+threads), so a cached result is what makes a rerun identical: a run served from the cache reports
+``from_cache`` and the harness then records determinism as not tested.
 """
 from __future__ import annotations
 
@@ -138,7 +139,8 @@ def annotate(image: np.ndarray, valid: np.ndarray) -> dict:
     """vesselmap's map of one still, as polylines and typed junctions (the network cached, ``_key``)."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, _key(image) + ".json")
-    if os.path.exists(path):
+    cached = os.path.exists(path)
+    if cached:
         with open(path) as fh:
             res = json.load(fh)
     else:
@@ -151,5 +153,5 @@ def annotate(image: np.ndarray, valid: np.ndarray) -> dict:
     from vesselmap.network import VesselNetwork
     assert res["config"] == CONFIG and res.get("vesselmap") == vesselmap_version(), (path, res["config"])
     out = export(VesselNetwork.from_dict(res["net"]))
-    out.update(build_seconds=res["seconds"], vesselmap_config=res["config"])
+    out.update(build_seconds=res["seconds"], vesselmap_config=res["config"], from_cache=cached)
     return out

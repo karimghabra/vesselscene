@@ -1,7 +1,9 @@
 """Comparison annotator: the standard curvature-analysis pipeline (Hessian ridges, skeleton, post-hoc typing).
 
 This is the method family the neuromimetic annotator is measured against (DESIGN.md, "Why not curvature
-alone"), built as a competent practitioner would, with its few thresholds tuned on the dev scenes:
+alone"), built as a competent practitioner would, with its few thresholds tuned on the dev scenes (see
+"Tuning" below: it is tuned on the scenes it is reported on there, vesselmap runs at its default config, so
+the dev table favours this baseline; the fair comparison is on held-out scenes):
 
 1. **Log and flat field.**  ``L = log I`` (no-data pixels filled from the nearest valid one, so filters see no
    step; they and saturated glare, grown by 3 px, are masked).  The background ``B`` is a grey closing of
@@ -17,20 +19,32 @@ alone"), built as a competent practitioner would, with its few thresholds tuned 
    cancels the response where two vessels meet (both eigenvalues large), so lines stop a few px short of
    every junction.  Each line end is joined straight to the nearest skeleton pixel ahead of it (within
    ``BRIDGE_PX`` and a cone of ``BRIDGE_DEG``), then the result is thinned again.  On the dev scenes this
-   step raises junction recall from 0.10 to 0.64 (F1 0.16 -> 0.56).
+   step raises junction recall from 0.09 to 0.48 (F1 0.15 -> 0.54).
 4. **Skeleton graph.**  Pixels are linked 8-connected, a diagonal link being dropped where a 4-connected
    path of skeleton pixels joins the same two pixels (otherwise every staircase step reads as a branch).
    Pixels with >= 3 links are junction pixels, clustered 8-connected into nodes; pixels with one link are
    ends.  Arms are traced between nodes: one polyline per arm.  Spurs (an end arm shorter than a
    scale-aware length) are pruned, nodes left with two arms dissolve, until stable.
-5. **Post-hoc junction typing.**  Junction nodes joined by an arm shorter than ``MERGE_PX`` (about lambda)
-   are merged into one node (a crossing read through a Hessian is typically two forks a few px apart).  A
-   node's arms point from its centre to each arm's point ``ARM_LOOK_PX`` along it.  3 arms -> 'pseudo-T' (the
-   most frequent 3-way class in the observable truth; a still shows no flow direction), 4 arms that pair into
-   two near-collinear through lines -> 'crossing', otherwise 'compound'.
+5. **Post-hoc junction typing.**  Junction nodes joined by an arm shorter than ``MERGE_PX`` (about 2 lambda,
+   the scale of the truth's junction regions: median radius 17-42 px on dev) are merged into one node (a
+   crossing read through a Hessian is typically two forks a few px apart).  A node's arms point from its
+   centre to each arm's point ``ARM_LOOK_PX`` along it.  3 arms -> 'pseudo-T' (the most frequent 3-way class
+   in the observable truth; a still shows no flow direction), 4 arms that pair into two near-collinear through
+   lines -> 'crossing', otherwise 'compound'.  This rule is not a competent typer: on dev its coarse accuracy
+   (about 0.40) stays below the constant majority label ('compound', about 0.55 on the same matched
+   junctions) at every MERGE_PX from 6 to 36 px, so the typing columns compare against the harness's
+   majority and balanced references, not against this rule alone.
 
 Polylines run from node centre to node centre.  Everything is deterministic: fixed filters, no random
 numbers (the cached noise constant of ``ridge_maps`` is a fixed-seed simulation), stable orders.
+
+Tuning (grid search on the mean of centreline F1, junction F1, coarse type accuracy and edge cover, over the
+average and frame of the dev scenes healthy_s004_320x512, healthy_s000_480x768 and pathologic_s000_480x768):
+SCALES, BG_DISK_PX, Z_LO / Z_HI and MIN_COMPONENT_PX on all three; MERGE_PX, THROUGH_COS, ARM_LOOK_PX,
+BRIDGE_PX, BRIDGE_DEG and SPUR_PX first on the two healthy scenes, then re-swept on all three (MERGE_PX 6-36,
+THROUGH_COS 0.6-0.9, ARM_LOOK_PX 12-30, BRIDGE_PX 18-36, BRIDGE_DEG 25-45, SPUR_PX 6-14), which moved MERGE_PX
+from 11.9 to 24, BRIDGE_DEG from 35 to 25 and SPUR_PX from 10 to 14 (composite 0.527 -> 0.536; the surface is
+flat within about 0.005 around it).  No test scene was used.
 """
 from __future__ import annotations
 
@@ -59,11 +73,11 @@ BG_SMOOTH_PX = 8.0
 SCALES = (1.0, 1.5, 2.2, 3.3, 5.0, 7.5, 11.0, 16.0)
 Z_LO, Z_HI = 1.5, 2.0      # hysteresis on the ridge z-score
 MIN_COMPONENT_PX = 12      # skeleton components shorter than this are dropped
-SPUR_PX = 10.0             # an end arm shorter than max(SPUR_PX, 1.5 x its ridge scale) is a spur
-MERGE_PX = LAMBDA_PX       # junction nodes joined by a shorter arm are one junction
+SPUR_PX = 14.0             # an end arm shorter than max(SPUR_PX, 1.5 x its ridge scale) is a spur
+MERGE_PX = 24.0            # junction nodes joined by a shorter arm are one junction (about 2 lambda)
 ARM_LOOK_PX = 24.0         # arm direction: node centre -> the arm's point this far along it
 BRIDGE_PX = 2.5 * LAMBDA_PX  # end-gap closing: reach,
-BRIDGE_DEG = 35.0            # cone half-angle about the end's direction,
+BRIDGE_DEG = 25.0            # cone half-angle about the end's direction,
 BRIDGE_LOOK_PX = 8           # read from the pixel this many steps back along the line
 THROUGH_COS = 0.9          # two arms are one through line when their directions are within ~26 deg of opposite
 
