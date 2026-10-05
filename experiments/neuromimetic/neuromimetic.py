@@ -70,6 +70,7 @@ class Config:
     assoc_len: float = 8.0              # px, std of the lobes' weight along the tangent
     assoc_steps: int = 3
     assoc_gain: float = 1.0
+    assoc_fill: bool = False            # True: C = max(U, ...): the field only adds (no end shrinking)
     # 6. readout
     t_high: float = 3.5
     t_low: float = 1.7
@@ -458,6 +459,8 @@ def association_field(U: np.ndarray, sigma: float, cfg: Config = DEFAULT, f: int
             (Kf, af), (Kb, ab) = kern[k]
             Bp[k] = np.sqrt(np.maximum(_corr(Pm[k], Kf, af), 0) * np.maximum(_corr(Pm[k], Kb, ab), 0))
         C = (U0 + g * Bp) / (1.0 + g)
+        if cfg.assoc_fill:                            # facilitation only: gaps fill, nothing is suppressed
+            C = np.maximum(C, U0)
     return C
 
 
