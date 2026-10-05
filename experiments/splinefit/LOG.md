@@ -305,3 +305,25 @@ Predicted: empty sweep 0.612 -> ~1.0 (empty_average 0.22 -> 1.0; +0.023 probe_sc
 unchanged (their wide vessels are flanked by background), fast crops unchanged (crops are >= 97 % valid and
 their wide vessels rarely run along the crop border; at worst a pathologic edge along the border goes:
 graph / explained down slightly there). Composite +0.008 to +0.012.
+
+E5 result (tier 1, 34d262c): composite **0.781836 (+0.0132), keep**, but only half held. probe_score 0.850 ->
+0.884: empty 0.61 -> 1.00 (held) and, not predicted, the thin and faint line probes too (line_d2.5 0.48 ->
+0.64, line_d3 0.66 -> 0.74, line_d6_h0.25 0.71 -> 0.80, line_d6_h0.5 +0.014, fork_thin +0.015): every probe
+shares the same illumination field, and its dark lump at the bottom-right frame edge was fitted as a faint
+wide edge (r 14-19 px, s 8-13 px, a 0.01-0.05) in most of them. fast_composite 0.687 -> 0.680 (NOT held):
+true wide vessels running along the CROP border lost (s007 average: an a 0.31, r 17 px vein, explained 0.69 ->
+0.44; s008 average graph 0.66 -> 0.61; s000 frame -0.007). Recording of every wide edge's flank fraction
+(scratch diag): one-flanked true vessels 0.29-0.49 (a 0.14-0.41), one-flanked false lumps 0.00-0.48 (a
+0.004-0.08, one blob at 0.32). Geometry alone cannot tell a vessel cut by the frame from an illumination
+lump at the frame (the frame vs aperture distinction does not either: the probes' outer flanks also leave
+the frame); contrast can. Tier 2 has no probes and full-image borders, so E5 as it stands would likely lose
+there.
+
+### E6: only FAINT one-flanked wide edges are illumination (pre-registered)
+
+Hypothesis: an illumination lump at the frame is faint and broad (OD contrast a < 0.1), a vessel cut by the
+frame is not; the flank test should apply only to the faint ones (the threshold is read off the recording
+above: exploratory, not confirmatory). Change: E5's removal also needs mean a < flank_a = 0.1.
+Predicted: fast_composite back to E3's 0.687 (s007 avg, s008 avg, s000 frame restored; graph, explained
+back up), probe_score 0.884 -> ~0.883 (line_d6_h0.5's strong blob, a 0.32, is kept again), composite
+~0.785 (+0.003 over E5).

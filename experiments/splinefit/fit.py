@@ -76,6 +76,8 @@ class FitConfig:
     wide_bg_sigma: float = 25.0     # px, the smooth background's scale in that test
     flank_k: float = 2.0            # a wide edge's flanks lie at r + flank_k s from its centreline ...
     flank_min: float = 0.5          # ... and both must be observed (in the image, valid) on this fraction
+    flank_a: float = 0.1            # ... unless its contrast (mean a, OD) reaches this: a strong one-sided
+                                    # line at the frame is a vessel cut by the frame, not an illumination lump
     prune_free_only: bool = False   # True: only edges with a free end may be pruned
     fit_pos: bool = True            # False: geometry stays at the proposal (profiles, optics only)
     retarget: bool = True           # re-clean the target with the render's support before the final fit
@@ -224,8 +226,9 @@ def two_flanked(net: VesselNetwork, eid, ok: np.ndarray, k: float) -> float:
 
 
 def prune(net: VesselNetwork, model: JunctionModel, cfg: FitConfig, log=None, ok: np.ndarray | None = None) -> list:
-    """MDL: remove edges whose gain (per corr_px) does not pay for their description, and wide edges whose two
-    flanks are not observed (two_flanked < flank_min; ok = the valid-data map). Returns removed ids."""
+    """MDL: remove edges whose gain (per corr_px) does not pay for their description, and faint wide edges whose
+    two flanks are not observed (mean a < flank_a and two_flanked < flank_min; ok = the valid-data map).
+    Returns removed ids."""
     if not model.eids:
         return []
     # two estimates: without the node-site cores (where removing an arm's additive entries is not what the
@@ -258,7 +261,8 @@ def prune(net: VesselNetwork, model: JunctionModel, cfg: FitConfig, log=None, ok
             continue
         if gains[k] < pen or gains[k] / L < cfg.min_gain_per_px:
             removed.append(eid)
-        elif ok is not None and k in wide and two_flanked(net, eid, ok, cfg.flank_k) < cfg.flank_min:
+        elif ok is not None and k in wide and float(np.mean(e.a)) < cfg.flank_a and \
+                two_flanked(net, eid, ok, cfg.flank_k) < cfg.flank_min:
             removed.append(eid)
     for eid in removed:
         net.remove_edge(eid)
