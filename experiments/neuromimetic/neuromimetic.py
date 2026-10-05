@@ -6,11 +6,14 @@ below whose docstring gives its biological counterpart and its maths:
 1. photoreceptors / horizontal cells (`photoreceptors`): log response and a background fitted only outside the
    vesselness mask; the target is the cleaned optical density OD = B - L (vessels positive, overlaps add);
 2. OFF-centre ganglion cells with contrast gain control (`ganglion_cells`): band-pass OD over the local RMS of
-   the same band (the band-matched CNR the truth itself uses);
-3. V1 simple cells (`simple_cells`): even (line) and odd (edge) oriented filters, 16 orientations, 9 scales in
-   three spatial-frequency channels, each a CNR: an orientation score U(x, y, theta) per channel;
-4. the non-classical surround (`surround`): cross-orientation subtraction of the isotropic (blob) part and
-   iso-orientation flank suppression from the weaker flank, keeping several orientation peaks per pixel;
+   the same band (the band-matched CNR the truth itself uses). It is a side branch, not a step V1 reads: its
+   CNR sets stage 1's vesselness mask, and its RMS maps set stage 8's visibility floor;
+3. V1 simple cells (`simple_cells`): even (line) and odd (edge) oriented filters on the OD of stage 1,
+   16 orientations, 9 scales in three spatial-frequency channels, each normalised to a CNR by its own local
+   RMS: an orientation score U(x, y, theta) per channel;
+4. the non-classical surround (`surround`): subtractive cross-orientation suppression of the isotropic (blob)
+   part and iso-orientation flank suppression from the weaker flank, keeping several orientation peaks per
+   pixel;
 5. horizontal connections / association field (`association_field`): a fixed number of bipole diffusion
    steps in (x, y, theta) that close gaps without extending line ends;
 6. readout (`readout`): non-maximum suppression across space and orientation and a tracker that follows each
@@ -18,8 +21,8 @@ below whose docstring gives its biological counterpart and its maths:
 7. end-stopped cells (`end_stopping`): line ends on lines (T), lines through lines (X), clustered into
    junctions typed by their arms; every polyline runs junction to junction;
 8. iterative refinement (`refine`): the graph rendered additively in OD, the residual against the cleaned OD
-   (never against a vesselness map), MDL pruning, and optionally re-proposal from the positive residual
-   (`annotate_repropose`), a fixed number of rounds.
+   (never against a vesselness map) and MDL pruning, a fixed number of rounds (two), optionally with
+   re-proposal from the positive residual between them (`annotate_repropose`).
 
 Everything is deterministic: fixed filter banks and iteration counts, no random numbers, stable sorts with
 coordinate tie-breaks, per-pixel operations (FFT and OpenCV filters) whose result does not depend on the
@@ -39,6 +42,7 @@ from scipy import ndimage as ndi
 
 cv2.setNumThreads(2)
 FFT_WORKERS = 2
+_FIT_ONLY = False
 LAMBDA_PX = 11.9                        # vesselscene's lambda (truth.LAMBDA_PX): the length scale of a junction
 
 
@@ -51,6 +55,7 @@ class Config:
     bg_iters: int = 2
     mask_z: float = 2.0                 # band CNR above which a pixel is vessel (mask for the background)
     mask_dilate: int = 2                # px
+    bg_trace_k: float = 0.0             # >0: the traced lumens (+- bg_trace_k w) join the mask, B refitted, 3-6 rerun
     # 2. ganglion cells
     bands: tuple = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0)
     rms_sigma: float = 24.0             # px, window of the local contrast (RMS) estimate
@@ -96,7 +101,7 @@ class Config:
     od_width: bool = True               # vessel widths from OD cross-sections (else 2.5 x the filter scale)
     # 8. iterative refinement
     verify: bool = True
-    rounds: int = 1                     # fixed number of render / prune (/ re-propose) rounds
+    rounds: int = 2                     # fixed number of render / prune passes (re-proposal, if on, between them)
     repropose: bool = False             # re-propose from the residual (implemented; it lowered every dev score)
     re_k: float = 1.3                   # thresholds of the re-proposal readout, x t_high / t_low
     re_mdl: float = 20.0                # description cost multiplier of a re-proposed trace's edges
@@ -181,7 +186,8 @@ def _upper_envelope(L: np.ndarray, radius: float) -> np.ndarray:
     return cv2.resize(sp, (w * f, h * f), interpolation=cv2.INTER_LINEAR)[:H, :W]
 
 
-def photoreceptors(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT) -> dict:
+def photoreceptors(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT,
+                   extra: np.ndarray | None = None) -> dict:
     """Stage 1, photoreceptors and horizontal cells: a logarithmic (Weber) response adapted to the local mean
     of the background around it.
 
@@ -208,17 +214,21 @@ def photoreceptors(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT) 
     S = _gblur(OD, 1.0)
     m = float(np.median(S[ok]))
     bg = ok & (S < m + 2.0 * _robust_rms(S - m, ok))
+    if extra is not None and not _FIT_ONLY:
+        bg &= ~extra
     mask = ~bg
     for _ in range(cfg.bg_iters):
         Z, _rms = _band_cnr(OD, bg, cfg)
         S = _gblur(OD, 1.0)
         sr = _local_rms(S - np.median(S[bg]), bg, cfg.rms_sigma * 2)
         mask = (Z > cfg.mask_z) | (S > 3.0 * sr)
+        if extra is not None and not _FIT_ONLY:
+            mask |= extra
         if cfg.mask_dilate:
             k = 2 * cfg.mask_dilate + 1
             mask = cv2.dilate(mask.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))) > 0
         bg = ok & ~mask
-        B = _masked_mean(L, bg, cfg.bg_sigma)
+        B = _masked_mean(L, bg if extra is None else bg & ~extra, cfg.bg_sigma)
         OD = B - L
     OD = np.where(ok, OD, 0.0).astype(np.float32)
     if not ok.all():                                  # filters see the nearest valid OD, not a step to 0
@@ -248,6 +258,8 @@ def ganglion_cells(OD: np.ndarray, bg: np.ndarray, cfg: Config = DEFAULT) -> dic
     Maths: per band s, D_s = (G_s - G_2s) * OD, divided by the robust local RMS of the same band over the
     background pixels (Winsorised, masked normalised convolution of D_s^2); Z = max_s D_s / RMS_s. This is the
     band-matched CNR the truth uses to decide what is observable.
+    Used for: the vesselness mask of stage 1 (Z, through _band_cnr) and the visibility floor of stage 8 (the
+    RMS maps). V1 does not read Z: stage 3 filters the OD itself and normalises its own responses.
     Returns dict(Z, rms={s: local RMS map})."""
     Z, rms = _band_cnr(OD, bg, cfg)
     return dict(Z=Z, rms=rms)
@@ -389,17 +401,17 @@ def _corr(X: np.ndarray, K: np.ndarray, anchor) -> np.ndarray:
 def surround(U: np.ndarray, sigma: float, cfg: Config = DEFAULT, f: int = 1) -> np.ndarray:
     """Stage 4, the non-classical receptive field: cross-orientation and iso-orientation (flank) suppression.
 
-    Biology: a V1 cell's response is divided (normalised) by the pooled activity of cells of all orientations
-    at its location (cross-orientation suppression), and suppressed by cells of its own orientation in the
-    surround (iso-orientation surround suppression): a contour on an empty background is salient, the same
-    contour within texture is not.
-    Maths: with P = max(U, 0), the isotropic part of the orientation tuning at a pixel is the mean of its
-    lower half over theta (a blob responds at all orientations, a line or a crossing at one or two: about
-    0.04 of the peak for a line here, so several peaks per pixel survive); U1 = U - cross_k iso. The flank
-    energy F_theta is P_theta averaged over a strip on each side of the line, at d1 = 2.5 sigma + 1 to
-    d1 + max(6, 1.5 sigma) px (sigma: the channel's scale), and only the weaker of the two flanks counts
-    (texture surrounds a pixel on both sides, a neighbour in a vessel bundle on one only):
-    U2 = U1 - flank_k min(F_left, F_right)."""
+    Biology: a V1 cell's response is suppressed by the pooled activity of cells of all orientations at its
+    location (cross-orientation suppression; in cortex largely divisive normalisation), and by cells of its
+    own orientation in the surround (iso-orientation surround suppression): a contour on an empty background
+    is salient, the same contour within texture is not.
+    Maths: both suppressions are subtractive here; DESIGN's divisive normalisation was not implemented. With
+    P = max(U, 0), the isotropic part of the orientation tuning at a pixel is the mean of its lower half over
+    theta (a blob responds at all orientations, a line or a crossing at one or two: about 0.04 of the peak for
+    a line here, so several peaks per pixel survive); U1 = U - cross_k iso. The flank energy F_theta is
+    P_theta averaged over a strip on each side of the line, at d1 = 2.5 sigma + 1 to d1 + max(6, 1.5 sigma) px
+    (sigma: the channel's scale), and only the weaker of the two flanks counts (texture surrounds a pixel on
+    both sides, a neighbour in a vessel bundle on one only): U2 = U1 - flank_k min(F_left, F_right)."""
     n = U.shape[0]
     P = np.maximum(U, 0)
     iso = np.sort(P, axis=0)[: n // 2].mean(0)
@@ -804,6 +816,9 @@ def _concat(A: dict, B: dict) -> dict:
         if k != "xy" and isinstance(v, np.ndarray) and len(v) == na and k in B and len(B[k]) == nb:
             fill = np.full(m, 0.5 * (v[-1] + B[k][0]), float)
             out[k] = np.concatenate([v, fill, B[k]])
+    fa, fb = (np.broadcast_to(np.asarray(T.get("new", 0.0), float), (len(T["xy"]),)) for T in (A, B))
+    if fa.any() or fb.any():                          # stage 8's re-proposed points, per point
+        out["new"] = np.concatenate([fa, np.full(m, 0.5 * (fa[-1] + fb[0])), fb])
     return out
 
 
@@ -848,10 +863,15 @@ def _events(traces: list, cfg: Config) -> list:
                 continue
             _, j, m, q = best
             end_end = min(m, len(traces[j]["xy"]) - 1 - m) < 3
-            pos = 0.5 * (p + pts[q]) if end_end else pts[q].copy()
+            # where the end's own line meets the other centreline (within the attachment reach), else the
+            # nearest point: the two halves of an oblique crossing broken at a wide vessel then meet at one
+            # point instead of their feet w / tan(angle) apart
+            hit = _ray_hit(p, d, traces[j]["xy"], m, cfg.gap_att + wall[q] / 2)
+            foot = pts[q].copy() if hit is None else hit
+            pos = 0.5 * (p + pts[q]) if end_end else foot
             # a short gap outside the other lumen is closed by extending the end to the other centreline;
             # an end already inside a (wide) lumen stays where it is
-            att = (i, e, pts[q].copy()) if (best[0][0] > 0 and math.hypot(*(pts[q] - p)) <= cfg.ext_max) else None
+            att = (i, e, foot) if (best[0][0] > 0 and math.hypot(*(foot - p)) <= cfg.ext_max) else None
             ev.append(dict(p=pos, tr=(i, j), wt={i: float(t["w"][ie]), j: float(wall[q])},
                            wide=max(t["w"][ie], wall[q]), thin=min(t["w"][ie], wall[q]), kind="T", att=att))
     lines = [LineString(t["xy"]) for t in traces]
@@ -870,6 +890,25 @@ def _events(traces: list, cfg: Config) -> list:
             ev.append(dict(p=c, tr=(a, b), wt={a: float(wa), b: float(wb)}, wide=max(wa, wb), thin=min(wa, wb),
                            kind="X", att=None))
     return ev
+
+
+def _ray_hit(p: np.ndarray, d: np.ndarray, Q: np.ndarray, m: int, reach: float):
+    """The nearest point p + s d (0 <= s <= reach) on the polyline Q, searched around its point m; None if the
+    ray misses it there."""
+    w = int(math.ceil(reach)) + 3
+    A = Q[max(m - w, 0):m + w + 1]
+    if len(A) < 2:
+        return None
+    V, Wv = np.diff(A, axis=0), A[:-1] - p
+    den = d[0] * V[:, 1] - d[1] * V[:, 0]
+    ok = np.abs(den) > 1e-9
+    den = np.where(ok, den, 1.0)
+    s = (Wv[:, 0] * V[:, 1] - Wv[:, 1] * V[:, 0]) / den
+    u = (Wv[:, 0] * d[1] - Wv[:, 1] * d[0]) / den
+    ok &= (s >= 0) & (s <= reach) & (u >= 0) & (u <= 1)
+    if not ok.any():
+        return None
+    return p + float(s[ok].min()) * d
 
 
 def _cluster_events(ev: list, cfg: Config) -> list:
@@ -1026,8 +1065,9 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
 
 
 def _split(traces, junctions, cfg):
-    """Cut every trace at its point nearest each of its junctions; drop free stubs shorter than arm_min and
-    pieces inside one junction."""
+    """Cut every trace at its point nearest each of its junctions; drop pieces inside one junction, and free
+    pieces (one end at a junction) whose stretch beyond the junction's disc is shorter than arm_min, the test
+    _arms counts an arm by, so a junction's edges are its arms."""
     per = {}
     for ji, J in enumerate(junctions):
         c = np.array([J["x"], J["y"]])
@@ -1044,8 +1084,15 @@ def _split(traces, junctions, cfg):
                 continue
             xy = t["xy"][a:b + 1]
             L = _plen(xy)
-            if ((ja is None) or (jb is None)) and L < cfg.arm_min:
+            if ja is None and jb is None and L < cfg.arm_min:
                 continue
+            if (ja is None) != (jb is None):          # a free piece: its length outside the junction disc
+                J = junctions[jb if ja is None else ja]
+                Q = xy[::-1] if ja is None else xy    # junction end first
+                inside = np.hypot(Q[:, 0] - J["x"], Q[:, 1] - J["y"]) <= J["r"]
+                k = int(np.argmin(inside)) if not inside.all() else len(Q)
+                if _plen(Q[max(k - 1, 0):]) < cfg.arm_min:
+                    continue
             if ja is not None and ja == jb and L < 2 * junctions[ja]["r"]:
                 continue
             edges.append(dict(xy=xy.copy(), c=t["c"][a:b + 1].copy(), w=t["w"][a:b + 1].copy(), j=(ja, jb),
@@ -1305,6 +1352,18 @@ def _junction_mask(shape, junctions, cfg) -> np.ndarray:
     return m > 0
 
 
+def _lumen_mask(shape, traces, k: float) -> np.ndarray:
+    """The traced lumens, +-max(1, k w) px across every trace (w its readout width, piecewise along it)."""
+    m = np.zeros(shape, np.uint8)
+    for t in traces:
+        P = np.round(t["xy"]).astype(np.int32)
+        for i in range(0, len(P) - 1, 4):
+            j = min(i + 4, len(P) - 1)
+            hw = max(1, int(round(k * float(np.median(t["w"][i:j + 1])))))
+            cv2.line(m, tuple(P[i].tolist()), tuple(P[j].tolist()), 1, 2 * hw + 1)
+    return m > 0
+
+
 def _core_mask(shape, edges) -> np.ndarray:
     """The lumens (half width r) of the rendered edges."""
     m = np.zeros(shape, np.uint8)
@@ -1323,13 +1382,16 @@ def _assemble_profiled(traces, cfg, OD):
         t = traces[e["trace"]]
         a, b = e["rng"]
         e["pa"], e["pr"], e["ps"] = t["pa"][a:b + 1], t["pr"][a:b + 1], t["ps"][a:b + 1]
-        e["new"] = bool(t.get("new", False))
+        nw = np.asarray(t.get("new", 0.0), float)    # per point: re-proposed in stage 8
+        e["new"] = bool(nw.ndim and nw[a:b + 1].mean() > 0.5)   # an edge is new if most of it is
     return edges, junctions, traces
 
 
 def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = None):
     """Stage 8, iterative refinement (the lesson of diffusion models, deterministic like DDIM): a fixed
-    number of rounds of render, compare, prune (and, optionally, re-propose).
+    number (cfg.rounds) of rounds of render, compare and prune, with an optional re-proposal between two
+    rounds. The default is two rounds without re-proposal: the second round prunes the free-end edges that
+    the first round's removals leave once the graph is re-assembled.
 
     Each round: the graph (stage 7) is built from the traces; every trace gets its contrast, width and blur
     along it from cross-sections of the cleaned OD target (fit_profiles); the graph is rendered additively in
@@ -1341,7 +1403,7 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
     positive residual outside the junctions is passed again through stages 3-6 to propose what the graph
     does not yet explain (a vessel masked by a stronger neighbour, an arm lost at a junction); new traces
     that are novel (outside the rendered lumens) join the others and pay re_mdl x the description cost in
-    the next prune. On dev the re-proposal lowered every score, so it is off by default (NOTES). After the
+    the next round's prune. On dev the re-proposal lowered every score, so it is off by default (NOTES). After the
     last round the graph is assembled once more and the knot cue (residual at each junction centre over the
     thinner arm's contrast: ~0 for an additive crossing, ~-1 for a fork's union) is stored on each junction;
     it is not used for typing, the additive render being too inexact at junctions on dev."""
@@ -1350,12 +1412,12 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
     hp = OD - _gblur(OD, 8.0)
     sig2 = np.maximum(_local_rms(hp, bg, 32.0), 1e-4) ** 2
     sig2 = np.where(s1["ok"], sig2, 1e12)              # invalid pixels carry no weight
-    for rnd in range(cfg.rounds + 1):
+    for rnd in range(cfg.rounds):
         edges, junctions, traces = _assemble_profiled(traces, cfg, OD)
         jm = _junction_mask(OD.shape, junctions, cfg)
         keep, rd = _mdl_prune(OD, np.where(jm, 1e12, sig2), edges, cfg, s1.get("rms"))
         traces = _remove_ranges(traces, edges, keep, cfg)
-        if rnd < cfg.rounds and cfg.repropose:
+        if rnd < cfg.rounds - 1 and cfg.repropose:
             # what the graph does not explain: the positive residual (an over-predicted knot proposes
             # nothing), outside the junction regions, where the additive render of a fork is not exact
             res = np.maximum(rd.residual(), 0) * (1 - _gblur(jm.astype(np.float32), 2.0))
@@ -1368,7 +1430,7 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
             for t in merged:                          # novel: mostly outside the lumens already rendered
                 ix = np.clip(np.round(t["xy"]).astype(int), 0, [OD.shape[1] - 1, OD.shape[0] - 1])
                 if float((~core[ix[:, 1], ix[:, 0]]).sum()) >= cfg.re_novel * cfg.min_len:
-                    traces.append(dict(t, new=True))
+                    traces.append(dict(t, new=np.ones(len(t["xy"]))))
     edges, junctions, traces = _assemble_profiled(traces, cfg, OD)
     rd = _Render(OD, sig2, edges, cfg)
     _knots(junctions, edges, rd, cfg)
@@ -1388,9 +1450,12 @@ def propose(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, keep_ma
     """Stages 1-6: the cleaned OD target, the band RMS maps of stage 2 and the traces of every channel, merged
     (with keep_maps, each channel's C and S maps too, for inspection)."""
     s1 = photoreceptors(image, valid, cfg)
-    s1["rms"] = ganglion_cells(s1["OD"], s1["bg"], cfg)["rms"]
     chans = [] if keep_maps else None
-    traces = _channel_traces(s1["OD"], s1["bg"], s1["ok"], cfg, keep=chans)
+    traces = _channel_traces(s1["OD"], s1["bg"], s1["ok"], cfg, keep=None if cfg.bg_trace_k > 0 else chans)
+    if cfg.bg_trace_k > 0:
+        s1 = photoreceptors(image, valid, cfg, extra=_lumen_mask(s1["OD"].shape, traces, cfg.bg_trace_k))
+        traces = _channel_traces(s1["OD"], s1["bg"], s1["ok"], cfg, keep=chans)
+    s1["rms"] = ganglion_cells(s1["OD"], s1["bg"], cfg)["rms"]
     return dict(s1=s1, chans=chans, traces=merge_channels(traces, cfg, shape=s1["OD"].shape))
 
 
@@ -1441,5 +1506,6 @@ def annotate_v1_only(image, valid):
 
 
 def annotate_repropose(image, valid):
-    """All stages with stage 8's re-proposal from the residual switched on (one round, DESIGN's full loop)."""
+    """All stages with stage 8's re-proposal from the residual switched on (between its two rounds: prune,
+    re-propose, prune; DESIGN's full loop)."""
     return run(image, valid, replace(DEFAULT, **ABLATIONS["repropose"]))
