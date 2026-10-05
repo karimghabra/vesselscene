@@ -72,8 +72,8 @@ class Config:
     assoc_gain: float = 1.0
     assoc_fill: bool = False            # True: C = max(U, ...): the field only adds (no end shrinking)
     # 6. readout
-    t_high: float = 3.5
-    t_low: float = 1.7
+    t_high: float = 3.0                 # seed threshold of the readout (CNR units of C)
+    t_low: float = 1.5                  # continuation threshold (hysteresis)
     min_len: float = 10.0               # px, shortest trace kept
     border_px: int = 3                  # no line candidates this close to the frame or to invalid pixels
     look_px: int = 3                    # the tracker looks this far ahead (bridging 1-2 px gaps)
@@ -96,8 +96,8 @@ class Config:
     od_width: bool = True               # vessel widths from OD cross-sections (else 2.5 x the filter scale)
     # 8. iterative refinement
     verify: bool = True
-    rounds: int = 1                     # fixed number of render / prune / re-propose rounds (2 was worse on dev)
-    repropose: bool = True
+    rounds: int = 1                     # fixed number of render / prune (/ re-propose) rounds
+    repropose: bool = False             # re-propose from the residual (implemented; it lowered every dev score)
     re_k: float = 1.3                   # thresholds of the re-proposal readout, x t_high / t_low
     re_mdl: float = 20.0                # description cost multiplier of a re-proposed trace's edges
     re_novel: float = 2.0               # a re-proposed trace needs re_novel x min_len px outside rendered lumens
@@ -1407,11 +1407,12 @@ def run(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, debug: dict
 
 
 ABLATIONS = dict(full={}, no_verify=dict(verify=False), no_association=dict(association=False),
-                 no_surround=dict(surround=False), v1_only=dict(surround=False, association=False, verify=False))
+                 no_surround=dict(surround=False), v1_only=dict(surround=False, association=False, verify=False),
+                 repropose=dict(repropose=True))
 
 
 def annotate(image, valid):
-    """The full annotator, stages 1-8."""
+    """The full annotator, stages 1-8 (stage 8: render, residual and MDL pruning; no re-proposal)."""
     return run(image, valid, DEFAULT)
 
 
@@ -1433,3 +1434,8 @@ def annotate_no_surround(image, valid):
 def annotate_v1_only(image, valid):
     """Stages 1-3 + 6-7: the orientation score read out without any contextual stage."""
     return run(image, valid, replace(DEFAULT, **ABLATIONS["v1_only"]))
+
+
+def annotate_repropose(image, valid):
+    """All stages with stage 8's re-proposal from the residual switched on (one round, DESIGN's full loop)."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["repropose"]))
