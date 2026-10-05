@@ -187,3 +187,99 @@ Predicted: pos up (+0.01 to +0.03; most on pathologic and s004 frame), explained
 geometry no longer adapts; < 0.01), width equal or up, graph about equal (the topology is fixed before the
 retarget; node positions move less), probe_score about equal (flat probe backgrounds, little retarget
 change). Composite +0.003 to +0.01. Also a few seconds faster.
+
+E3 result (tier 1, 3834bb0): composite **0.768662 (+0.0094), keep**. pos 0.688 -> 0.752 (held, and 2-6x
+larger than predicted), explained 0.783 -> 0.772 (held: -0.010), width 0.761 -> 0.768 (held), graph 0.609 ->
+0.610 (held), probe_score 0.842 -> 0.850 (predicted equal; better: contrast 0.787 -> 0.808, corner 0.714 ->
+0.757, empty 0.535 -> 0.612 with the false vessel 93 -> 78 px; gap 0.798 -> 0.776 is the one sweep that lost).
+fast_composite 0.676 -> 0.687. A third of the v0 fit's positional loss happened in its last 60 iterations,
+on the re-cleaned target. Recording (residuals.py on fast 0, 2, 8 and fork_wide, cross_a20, empty_average):
+junction biases unchanged (fast0 -0.19..-0.33, fast2 -0.26..-0.49, fast8 -0.87 compound / pseudo-T), the
+discs still hold 0.39-0.56 of the squared residual: positions were fixed, the junction deficit was not. On
+fast2 the residual is a positive pedestal under and along both flanks of the wide vein (red stripes parallel
+to its edges) plus the unproposed wide vessel at the bottom border: the render's wide lumens are too narrow
+in their blurred flanks against the oracle target, i.e. the retargeted B still holds the flanks.
+
+### E4: a wider render support in the retarget (pre-registered)
+
+Hypothesis: the retarget excludes from B only the pixels where the render exceeds 0.5 sigma, dilated by
+3 px; a wide, blurred vessel's flanks extend further, so B still absorbs them and the final (now
+geometry-frozen) profile fit renders the wide lumens too narrow and the junction clusters too faint.
+Change: bg_dil 3 -> 6 px.
+Predicted: explained and explained_junction up (junction_bias toward 0), width up slightly (blur / radius
+follow the flanks), pos and graph unchanged (geometry and topology are fixed before the retarget), probe_score
+about unchanged (flat backgrounds; a few px less background near the probe vessels). Composite +0.002 to
++0.006.
+
+E4 result (tier 1, d9297b1): composite 0.768156 (-0.0005 against E3), **discard**. explained 0.772 -> 0.774 and
+explained_junction 0.770 -> 0.772 moved in the predicted direction but by a fifth of the prediction; width
+0.768 -> 0.765 (NOT held); pos and graph identical to E3 (held: geometry and topology are fixed before the
+retarget); probe_score 0.850 -> 0.849. Model update: the flank / pedestal deficit is not the retarget's
+dilation. Candidates left: stage 1's own mask (the retarget ORs it in, and its B is used for the first two
+stages' fit, so the widths are set on the leaky target and the final 60 profile iterations do not undo it),
+or the render family (vesselmap's blurred cylinder lacks the long tail of the formed blur and the halo).
+
+### Batch 1 summary
+
+| # | commit | change | tier-1 composite | graph | pos | width | explained | expl_junction | probe_score | status | prediction held? |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| v0 | fb6e415 | baseline | 0.759238 | 0.609 | 0.688 | 0.761 | 0.783 | 0.781 | 0.842 | baseline | - |
+| E1 | 898717e | retarget early (after the profile stage) | 0.752183 | 0.608 | 0.635 | 0.759 | 0.816 | 0.818 | 0.832 | discard | no: explained up as predicted, pos down 0.05 |
+| E2 | 8a4af52 | anchor_px 4 -> 1.5 | 0.759045 | 0.607 | 0.686 | 0.762 | 0.782 | 0.780 | 0.843 | discard | no: no part moved (null) |
+| E3 | 3834bb0 | geometry frozen in the final fit | **0.768662** | 0.610 | 0.752 | 0.768 | 0.772 | 0.770 | 0.850 | **keep** | yes, pos gain 2-6x the prediction |
+| E4 | d9297b1 | retarget support dilated 6 px (on E3) | 0.768156 | 0.610 | 0.752 | 0.765 | 0.774 | 0.772 | 0.849 | discard | direction only, a fifth of the size |
+
+**Tier 2 on E3 (3834bb0): composite 0.760516 against the confirmed 0.753886 (+0.0066), confirm.** graph
+0.679 -> 0.683, pos 0.772 -> 0.804, width 0.797 -> 0.798, explained 0.916 -> 0.912, explained_junction
+0.918 -> 0.915; 1789 s; digest `6b9c2fb82341e0c5`; deterministic: True. Nine of the ten images gained (healthy_s008
+frame -0.001); the largest gains were healthy_s004 (+0.012 / +0.014) and pathologic_s000 (+0.021 / +0.009).
+
+| image | kind | composite | graph | pos | width | explained | explained_junction | junction_bias |
+|---|---|---|---|---|---|---|---|---|
+| healthy_s000_480x768 | average | 0.825 | 0.767 | 0.855 | 0.811 | 0.979 | 0.983 | -0.087 |
+| healthy_s000_480x768 | frame | 0.815 | 0.734 | 0.859 | 0.868 | 0.959 | 0.962 | -0.104 |
+| healthy_s004_320x512 | average | 0.737 | 0.672 | 0.764 | 0.740 | 0.902 | 0.922 | -0.249 |
+| healthy_s004_320x512 | frame | 0.749 | 0.667 | 0.788 | 0.810 | 0.894 | 0.907 | -0.267 |
+| healthy_s007_480x768 | average | 0.781 | 0.694 | 0.843 | 0.776 | 0.988 | 0.989 | -0.060 |
+| healthy_s007_480x768 | frame | 0.774 | 0.671 | 0.822 | 0.826 | 0.978 | 0.984 | -0.069 |
+| healthy_s008_480x768 | average | 0.842 | 0.793 | 0.869 | 0.815 | 0.991 | 0.994 | -0.040 |
+| healthy_s008_480x768 | frame | 0.807 | 0.719 | 0.866 | 0.836 | 0.981 | 0.989 | -0.049 |
+| pathologic_s000_480x768 | average | 0.646 | 0.579 | 0.680 | 0.729 | 0.733 | 0.718 | -0.508 |
+| pathologic_s000_480x768 | frame | 0.630 | 0.532 | 0.693 | 0.774 | 0.716 | 0.700 | -0.537 |
+
+**Tuning curves (E3 against v0, per probe, |change| > 0.01).** The thin and faint lines improved through
+position: line_d2.5 0.454 -> 0.479 (pos 0.83 -> 0.89), line_d3 0.635 -> 0.661, line_d6_h0.25 0.670 -> 0.705
+(pos 0.75 -> 0.85), line_d5_f25_h0.5 0.716 -> 0.757 (pos 0.75 -> 0.88); cross_a45_wide_over_thin 0.888 -> 0.900
+(thin arm width 0.45 -> 0.50); end_blind 0.964 -> 0.975; empty_average's false vessel 93 -> 78 px. One loss:
+parallel_g2 0.659 -> 0.578 (pos 0.28 -> 0.14): two vessels 2 px apart need the final positional fit on the
+clean target to explain each other away. Every threshold is unchanged (width 2.5 px, blur 25 d_c, contrast
+hct 0.25, fork 4/5, crossing_angle 30 deg, crossing_depth 5 d_c, gap 2 px, empty 1/2): E3 raises the curves'
+levels (position), not their thresholds (detection and topology are set before the final fit).
+
+**What the batch taught (the model of the system).**
+1. The positive control loses in three separable ways (the recording above): the fitter's own drift on a
+   perfect target (0.36-0.41 px), drift after MDL removals (+0.1-0.25 px), and the leaky target (junction
+   bias -0.13). The drift is data-driven (E2: the prior is irrelevant) and is driven by OD the network does
+   not explain (E1: exposing more of it makes drift worse; E3: not letting positions answer to it in the last
+   stage is worth +0.064 pos on the crops, +0.032 on whole images).
+2. So target cleaning and the positional fit must be decoupled: positions from the stage-1 target and the
+   proposal, widths / contrasts / optics from the cleaned target. The junction deficit (bias -0.2 to -0.9 on
+   dev, unchanged by E3/E4) is then a profile / target problem, not a geometry one.
+3. The remaining big costs are recall (missed vessels: the unexplained OD that drags neighbours) and the
+   junction/pedestal deficit along wide vessels.
+
+**Directions for the next batch (ranked).**
+1. Re-propose from the residual (attention where error remains): after the joint fit, trace the
+   positive residual of the retargeted OD (the neuromimetic stages on OD - R) and add the new vessels before
+   the final fit; this removes the unexplained OD that drags neighbours, and should raise recall, graph and
+   explained together. Pre-register a pos gain on pathologic and s004.
+2. Decouple further: run the joint stage's positions on the stage-1 target but its profiles on the
+   retargeted one (E1 failed because both moved together); or retarget early with geometry frozen in the
+   joint stage's last half.
+3. MDL removals drag neighbours: refit the neighbours of a removed edge with positions frozen, or require
+   a removal to pay after refitting (explaining away run forward).
+4. The flank / pedestal deficit along wide vessels: stage 1's mask (OR-ed into every retarget) and the
+   cylinder profile's lack of the formed blur's tail; test retarget without stage 1's mask (render support
+   only) and a second halo term.
+5. parallel_g2 regressed under E3: a short positional-only final phase restricted to edge pairs closer than
+   their summed calibre.
