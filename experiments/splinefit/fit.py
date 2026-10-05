@@ -24,8 +24,9 @@ test are divided by corr_px (one independent observation per correlation area).
 Schedule (fixed iteration counts, FitConfig): profiles + optics with the geometry frozen, then everything
 jointly (anchored to where the stage started, vesselmap's tracking prior), then MDL pruning (an edge must
 explain more NLL than its description costs: vesselmap's n_params x log(pixels) x mdl_scale / 2; the larger of
-the gains with and without the node-site cores, where the additive gain approximation of a union is wrong),
-topology clean-up, retarget, and a final fit of the profiles and optics with the geometry frozen (a
+the gains with and without the node-site cores, where the additive gain approximation of a union is wrong;
+a faint wide edge must also be seen against background on both flanks, else it is the illumination roll-off
+at the aperture or frame, two_flanked), topology clean-up, retarget, and a final fit of the profiles and optics with the geometry frozen (a
 re-cleaned target exposes OD the network does not explain, e.g. missed vessels, and free centrelines slide
 into it). The optimiser loop is adapted from LIMBUS vesselmap.fit.optimize (same author), with the kappa
 parameter group added.

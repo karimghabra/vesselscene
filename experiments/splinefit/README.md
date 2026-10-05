@@ -26,7 +26,8 @@ experiments that are kept or reset, a results log. The charter every experiment 
    halo follows.
 4. **Fit** (`fit.py`). Every parameter (control points, shared node positions, r/s/a profiles, halo, kappa)
    descends the same precision-weighted residual: profiles first, then everything jointly, MDL pruning (an
-   edge must explain more NLL than its description costs), topology clean-up, **retarget** (B re-fitted
+   edge must explain more NLL than its description costs; a faint wide edge must also be seen against
+   background on both flanks, batch 2, E5/E6), topology clean-up, **retarget** (B re-fitted
    outside stage 1's mask OR the fitted render's support), and a final fit of the profiles and optics with
    the geometry frozen (batch 1, E3: free centrelines slide into the OD the re-cleaned target exposes).
 5. **Export** (`pipeline.py`). One polyline per edge (junction to junction), nodes typed, crossings found

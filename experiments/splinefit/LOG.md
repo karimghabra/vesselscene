@@ -327,3 +327,57 @@ above: exploratory, not confirmatory). Change: E5's removal also needs mean a < 
 Predicted: fast_composite back to E3's 0.687 (s007 avg, s008 avg, s000 frame restored; graph, explained
 back up), probe_score 0.884 -> ~0.883 (line_d6_h0.5's strong blob, a 0.32, is kept again), composite
 ~0.785 (+0.003 over E5).
+
+E8 result (tier 1, f0cf830): composite 0.779753 (-0.0056 against E6), **discard**. NOT held: probe_score is
+E7's to the digit (0.8769: line_d3's false crossing edge and fork_thin_frame's compound pay any description
+cost; they are high-gain), and fast falls to 0.683 (s004 frame recall 0.61 -> 0.54, s008 frame 0.827 ->
+0.767, pathologic frame 0.546 -> 0.474), while the averages keep E7's gains (pathologic average 0.481).
+Model update: the false edges that stage 8 removes on the frames are not cheap edges; they explain real OD
+(the frames' red-cell texture, 20x the average's noise), and doubling the cost removes true faint vessels
+first. Stage 8's advantage there is its band-CNR visibility test (cnr_min) and its junction-disc-free
+gains, not its MDL cost: the joint fit needs a visibility (precision-relative contrast) test, not a
+higher price.
+
+### Batch 2 summary
+
+| # | commit | change | tier-1 composite | fast | graph | pos | width | explained | expl_junction | probe_score | status | prediction held? |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E3 | 3834bb0 | (batch 1, confirmed) | 0.768662 | 0.6870 | 0.610 | 0.752 | 0.768 | 0.772 | 0.770 | 0.850 | keep | - |
+| E5 | 34d262c | wide edge needs two observed flanks | 0.781836 | 0.6796 | 0.603 | 0.751 | 0.771 | 0.746 | 0.768 | 0.884 | keep | half: empty fixed (+ thin-line probes, unpredicted), but true wide vessels at the crop border lost |
+| E6 | 7b44ac6 | ... only for faint (a < 0.1) wide edges | **0.785308** | 0.6870 | 0.610 | 0.752 | 0.768 | 0.772 | 0.770 | 0.884 | **keep** | yes, on every part |
+| E7 | b28c95d | proposals = stage-7 graph (no stage-8 prune) | 0.786362 | 0.6959 | 0.625 | 0.757 | 0.770 | 0.774 | 0.770 | 0.877 | discard (+0.001) | partly: averages up, frames and probes down |
+| E8 | f0cf830 | E7 + mdl_scale 0.5 | 0.779753 | 0.6827 | 0.604 | 0.741 | 0.771 | 0.772 | 0.769 | 0.877 | discard | no: the false edges are high-gain |
+
+**Tier 2 on E6 (7b44ac6): composite 0.760600 against the confirmed 0.760516 (+0.0001), confirm.** graph
+0.683038, pos 0.803839, width 0.798460, explained 0.912187, explained_junction 0.914835; 1800 s; digest
+`bcdbe0a268f3c3a7`; deterministic: True. Nine of the ten images reproduce E3's digests exactly; only
+pathologic_s000 average changed (0.6463 -> 0.6471: one faint one-flanked wide edge removed). As predicted for
+E6, the whole images (few aperture or frame lumps, strong border vessels kept by the contrast condition) are
+untouched; the batch's tier-1 gain is the negative control and the thin/faint line probes.
+
+**Tuning curves (E6 against E3).** empty 1/2 -> 2/2 (threshold; empty_average 0.22 -> 1.00); width sweep mean
+0.769 -> 0.831 (line_d2.5 0.48 -> 0.64, line_d3 0.66 -> 0.74: precision, graph_probe 0.63 -> 0.99 at d 2.5;
+but its width score stays 0.0-0.09 with width_bias +0.9..+1.1: a 2.5 px vessel is fitted twice too wide);
+contrast mean 0.808 -> 0.855 (line_d6_h0.25 0.71 -> 0.80); fork_thin +0.015. Every other threshold
+unchanged (width 2.5 px, blur 25 d_c, contrast hct 0.25, fork 4/5, crossing_angle 30 deg, crossing_depth
+5 d_c, gap 2 px). Residual recordings at dev junctions: unchanged from E3 (the deficit -0.2 to -0.9 and the
+0.39-0.56 disc share remain the largest unexplained error).
+
+**What the batch taught.**
+1. The negative control's false vessels were not noise but one shared illumination lump at the frame,
+   fitted as a faint wide 'vessel' in most probes; a one-flanked faint wide edge is background. Geometry
+   alone cannot separate it from a strong vessel cut by the crop border (E5 lost those); contrast can (E6).
+2. Recall is bounded by stage 8, but stage 8 is doing two jobs: it removes true faint vessels on averages
+   and false, high-gain texture edges on frames (E7). The joint MDL test cannot take over by raising its
+   price (E8): the frames' false edges pay any price. A replacement must test VISIBILITY (contrast against
+   the local texture, as stage 8's cnr_min does) rather than NLL gain.
+
+**Directions for the next batch (ranked).**
+1. Stage-7 proposals (E7) plus a visibility test in the joint prune: an edge's fitted peak contrast over the
+   local band RMS (stage 2's rms maps, or the precision map) must exceed a CNR floor, like stage 8's cnr_min,
+   instead of a higher MDL price. Predicted: E7's average-image gains (+0.009 fast) without its frame losses.
+2. Re-propose from the residual (attention where error remains; batch 1's direction 1, still untried).
+3. Thin-vessel width bias (+100 % at d 2.5, +50 % at d 3): the blur / radius trade-off below the PSF; a prior
+   tying s to the image-wide optics (or fitting s jointly per image) for edges with r < s.
+4. Decouple positions from the cleaned target inside the joint stage; explaining away after MDL removals;
+   the flank / pedestal deficit along wide vessels; parallel_g2 (batch 1 directions 2-5, still open).
