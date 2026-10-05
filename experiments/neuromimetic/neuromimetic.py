@@ -1389,6 +1389,9 @@ def propose(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, keep_ma
 
 def run(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, debug: dict | None = None,
         proposal: dict | None = None) -> dict:
+    """The annotator with a given Config: stages 1-6 (or a cached proposal of them), then stage 8 (which runs
+    stage 7 in each round) or stage 7 alone. debug, a dict, receives the intermediate results. Returns the
+    harness's dict(polylines=[(n, 2) x, y], junctions=[(x, y, type)]), junctions strongest first."""
     pr = proposal if proposal is not None else propose(image, valid, cfg, keep_maps=debug is not None)
     traces = [dict(t) for t in pr["traces"]]
     if cfg.verify:
