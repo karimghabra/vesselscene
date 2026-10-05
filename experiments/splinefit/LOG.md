@@ -149,3 +149,41 @@ after that. Predicted: explained and explained_junction up (junction_bias toward
 geom_matched up, fast_composite up most on pathologic and healthy_s004/s007; probe_score about unchanged
 (the probes' backgrounds are flat). If explained rises but pos does not, the drift is the fitter's, not the
 target's.
+
+E1 result (tier 1, 898717e): composite 0.752183 (-0.007), **discard**. explained 0.783 -> 0.816 and
+explained_junction 0.781 -> 0.818 (held), but pos 0.688 -> 0.635 (NOT held; pathologic average 0.23 -> 0.02,
+healthy_s004 frame 0.61 -> 0.46: the crops whose stage-1 B leaked most) and probe_score 0.842 -> 0.832
+(crossing_depth threshold 5 -> 50). Surprise, and informative: a cleaner target puts MORE unexplained OD
+(the missed wide vessel of pathologic, missed faint vessels) next to the proposed vessels, and the joint fit
+pulls their centrelines into it. Same mechanism as (i)-(ii) above: position is driven by error far from the
+vessel. Model update: in this fitter a better target only pays once the positional updates are local.
+
+### E2: a tighter positional prior (pre-registered)
+
+Hypothesis: centreline drift (the fitter moving vessels by 0.4-0.7 px from a correct start, even on the
+oracle target) is the main loss; the anchored stages' prior (anchor_px = 4 px std about where the stage
+started) is too weak to stop vessels sliding into unexplained neighbouring OD. A receptive-field argument:
+a vessel's position should answer to error within about its own width, not to OD a vessel-width away.
+Change: anchor_px 4.0 -> 1.5.
+Predicted: pos up (offset down; most on s004 frame, s007, pathologic), explained down slightly (< 0.01:
+the drift absorbs only the last per cent), width about equal, graph equal or up (less drift, fewer
+geometry-driven prunes), probe_score equal or up (crossing_depth / crossing_width arms drift less; the 20 deg
+crossing may stay compound). Composite +0.003 to +0.01.
+
+E2 result (tier 1, 8a4af52): composite 0.759045 (-0.0002), **discard** (equal score, no simpler). pos 0.686,
+explained 0.782, probe_score 0.843: every part within noise (NOT held). The positional prior is negligible
+against the precision-weighted data term (the NLL of a 1 px shift of a vessel of OD 0.3 at sigma 0.02 is
+~10^2 per px of length; the prior's is 0.2 per control point): the drift is data-driven, not under-
+regularised. Model update: to stop drift, change what the positional gradient sees, not its prior.
+
+### E3: geometry frozen after the retarget (pre-registered)
+
+Hypothesis: E1 showed that a re-cleaned target pulls centrelines into the OD it newly exposes (missed
+vessels, leaked lumens). The v0 schedule does exactly that in its final stage: retarget, then 60 joint
+iterations with free positions. Freezing the geometry there (profiles, halo, kappa still fitted to the clean
+target) keeps the positions the joint stage found while the widths and contrasts follow the better target.
+Change: the final stage runs with fit_pos = False (FitConfig.final_pos = False).
+Predicted: pos up (+0.01 to +0.03; most on pathologic and s004 frame), explained down slightly (the final
+geometry no longer adapts; < 0.01), width equal or up, graph about equal (the topology is fixed before the
+retarget; node positions move less), probe_score about equal (flat probe backgrounds, little retarget
+change). Composite +0.003 to +0.01. Also a few seconds faster.

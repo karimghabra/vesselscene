@@ -25,8 +25,10 @@ Schedule (fixed iteration counts, FitConfig): profiles + optics with the geometr
 jointly (anchored to where the stage started, vesselmap's tracking prior), then MDL pruning (an edge must
 explain more NLL than its description costs: vesselmap's n_params x log(pixels) x mdl_scale / 2; the larger of
 the gains with and without the node-site cores, where the additive gain approximation of a union is wrong),
-topology clean-up, retarget, and a final joint fit (anchored to the post-prune state). The optimiser loop is
-adapted from LIMBUS vesselmap.fit.optimize (same author), with the kappa parameter group added.
+topology clean-up, retarget, and a final fit of the profiles and optics with the geometry frozen (a
+re-cleaned target exposes OD the network does not explain, e.g. missed vessels, and free centrelines slide
+into it). The optimiser loop is adapted from LIMBUS vesselmap.fit.optimize (same author), with the kappa
+parameter group added.
 """
 from __future__ import annotations
 
@@ -75,6 +77,7 @@ class FitConfig:
     prune_free_only: bool = False   # True: only edges with a free end may be pruned
     fit_pos: bool = True            # False: geometry stays at the proposal (profiles, optics only)
     retarget: bool = True           # re-clean the target with the render's support before the final fit
+    final_pos: bool = False         # the final fit (on the re-cleaned target) moves no centreline
     bg_thr: float = 0.5             # x local noise sigma: render support
     bg_dil: int = 3                 # px
     bg_sigma: float = 16.0          # px, masked normalised convolution of the re-fitted background
@@ -290,6 +293,6 @@ def fit_network(net: VesselNetwork, OD: np.ndarray, w: np.ndarray, cfg: FitConfi
         net.background = None                          # the new B replaces the smooth correction
         log.append(dict(retarget=True))
     model = make_model(net, OD, w, cfg, kappa, anchored=True)
-    optimize(model, cfg.iters_final, cfg, fit_pos=cfg.fit_pos, anchored=True, log=log)
+    optimize(model, cfg.iters_final, cfg, fit_pos=cfg.fit_pos and cfg.final_pos, anchored=True, log=log)
     model.write_back()
     return model, net, OD
