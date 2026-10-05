@@ -38,7 +38,7 @@ give the images where the fit is higher (and ties):
 
 What this says:
 - **The fit does what a whole-image render fit should.** It explains 0.91-0.92 of the vessel OD against
-  0.80-0.82 for the proposals' own profiles, and 0.93 against 0.80-0.83 in the junction discs. The
+  0.80-0.82 for the proposals' own profiles, and 0.93-0.94 against 0.80-0.83 in the junction discs. The
   junction-aware render (a union of lumens at a node, additive OD at a crossing) is what lets it explain the
   junctions. The figures below show the proposals' render with its large errors at compound junctions and
   along the wide vessel, and the fitted render, flat except where faint vessels were never proposed.
@@ -48,7 +48,7 @@ What this says:
 - **Against vesselmap:** much better graph, positions, crossings and line F1, on every image. vesselmap
   explains more of the image (0.95-0.97), partly with edges its graph does not support.
 - **The remaining gap is topology, not the render model.** The same fit started from the true network
-  explains more (0.94-0.95) and gets far better widths (0.93 against 0.80-0.83) and positions. Its graph score
+  explains more (0.94-0.95) and gets far better widths (0.93-0.94 against 0.80-0.83) and positions. Its graph score
   is low only because the complete truth includes vessels that are not observable. So the render and the fit
   are capable, and what they lack is a better network to start from. Missed faint vessels and junction arms
   count most: the fit cannot recover them, and the neighbouring vessels then absorb their OD.
@@ -57,8 +57,8 @@ What this says:
   minus the proposals is +0.024 composite (7 of 8 images) and +0.117 explained (8 of 8). The fit minus
   vesselmap there is +0.092 (8 of 8).
 - **Determinism and speed.** Two runs per image gave identical digests on all 12 held-out images, and the
-  confirmed development state reproduced its digest across sessions. A fit takes about 100-120 s per
-  480 x 768 image on 2 CPU threads.
+  confirmed development state reproduced its digest across sessions. A fit takes about 90-145 s (mean 108 s)
+  per 480 x 768 image on 2 CPU threads.
 
 ![held-out frame, proposals' render](results/heldout/figures/proposals_healthy_s003_frame.jpg)
 ![held-out frame, fitted render](results/heldout/figures/fit_healthy_s003_frame.jpg)
@@ -76,16 +76,20 @@ SPLINEFIT_ALLOW_HELDOUT=1`).
 
 ## What the autoresearch loop did and learned
 
-About 12.5 hours, 7 batches, 21 experiments (E1-E21), 27 tier-1 runs and 11 tier-2 runs, plus one tier-2 confirmation re-run after a container restart. Each batch was
-reviewed adversarially, and a lab-head review came every 3 batches. Every hypothesis was pre-registered with
-its predicted effect. [LOG.md](LOG.md) has every experiment, its prediction and what happened;
+About 13 hours from setup to the last batch (about 10.5 hours after the evaluator was frozen): 7 batches, 21 experiments (E1-E21), 27 tier-1 runs and 10 tier-2 runs. The last tier-2 run, the confirmation of the final state, was re-run after a container restart interrupted it. The kept changes of
+batches 1-6 were each reviewed adversarially, and the reviews' findings opened the next batch. A strategy
+review, looking at the probe tuning curves and residual recordings, came before batches 3 and 6. Batch 7's
+fixes were not reviewed. Every hypothesis was pre-registered with its predicted effect. [LOG.md](LOG.md) has every experiment, its prediction and what happened;
 `results/results.tsv` is the run log. On the development set, tier 2 went from 0.7539 (v0) to 0.7606. Four
-changes survived:
+changes survived, plus a determinism fix (be34189: vesselmap's render runs eagerly, not through
+torch.compile, whose per-shape cache made results depend on the images run before):
 - **E3: freeze the geometry in the final fit** (+0.0066 on tier 2). This was the one large gain. A cleaner
   target exposes OD the network does not explain yet, and free centrelines slide into it. So positions are
   fitted on the first target, and widths, contrasts and optics on the cleaned one.
-- **E5 and E6: a faint, wide edge must be seen on both flanks.** These are false wide vessels laid over
-  illumination lumps at the frame (the negative control).
+- **E5 and E6: a faint, wide edge must be seen on both flanks.** This removed false wide vessels laid over
+  illumination lumps at the frame in the probes (the negative control). On whole images it changes almost
+  nothing: tier 2 +0.0001, from one edge, which was part of a real border vessel. A later review (batch 4)
+  found the battery counts one shared lump many times, so the probe gain was overstated.
 - **E9: deleting two terms of the MDL prune** that never decided anything. The score is identical, and the
   code simpler.
 
@@ -94,33 +98,38 @@ Ideas that did not survive, kept as provisional switches (off):
   remains". About half the arms were real vessels, but no acceptance test (MDL cost, CFAR) separated the
   faint true arms from texture echoes.
 - **A coarse 'magnocellular' channel** (E18-E20). Novel coarse ridges join the background mask, and deep edges
-  are proposed. It is consistent but small (+0.0014 +- 0.0008 per scene). Without a cause for the deep OD it
-  restores, neighbouring vessels absorb it as contrast.
+  are proposed.
+  - The ridges alone give +0.0014 +- 0.0008 per scene (t 1.83). That is carried by s004 and pathologic, and
+    the guard metrics vetoed it: without a cause for the deep OD the ridges restore, neighbouring vessels
+    absorb it as contrast.
+  - With the deep edges, the gain is +0.0046 per image (t 1.50 per scene), mostly on one image.
 
 The main lessons, in the loop's own words (LOG.md):
 - **Where a cleaner target enters decides whether it helps** (E1, E3, E20). Positions must not chase OD the
   model cannot yet explain.
-- **On the hard images the target is the ceiling.** Stage 1's background keeps only 64-82 % of the true
-  OD on s004 and pathologic, before any fit.
+- **On the hard images the target is the ceiling.** The cleaned target keeps only 64-82 % of the true OD
+  on s004 and pathologic (stage 1's background takes 18-36 %), before any fit.
 - **Junction errors are missing arms, and typing errors start in the proposal's event clustering**
   (neuromimetic stage 7), which the fit never revisits.
-- **Fast crops and the single-seed probe battery over-reward added edges** (E7, E10, E13, E14). Whole
-  images (tier 2), with a paired per-scene test and multi-seed controls, are the honest test. The paired
+- **Fast crops over-reward added edges** (E7, E10, E13, E14). The single-seed probe battery is biased both
+  ways: it over-rated E5/E6's lump removal and under-rated E14's false arms. Whole images (tier 2), with a
+  paired per-scene test and multi-seed controls, are the honest test. The paired
   per-scene rule, guard metrics and controls were added to program.md during the night, after reviews caught
   gains that did not hold.
 
-Next steps, from the last batch:
-1. Topology moves decided by fit comparison at junction clusters: fork, crossing, T, and add or drop an arm.
-2. Deep edges with a pre-registered gate, tested on more scenes. With 5 development scenes, only 2 have deep
+Next steps (batch 7's ranking, then earlier batches' open directions):
+1. Deep edges with a pre-registered gate, tested on more scenes. With 5 development scenes, only 2 have deep
    vessels.
-3. Blur as optics (a per-image PSF floor), for width identifiability of thin vessels.
-4. A context-matched acceptance test for residual re-proposals.
+2. Blur as optics (a per-image PSF floor), for width identifiability of thin vessels.
+3. Topology moves decided by fit comparison at junction clusters: fork, crossing, T, and add or drop an arm
+   (batches 6-7). The held-out results point here: the oracle shows that the remaining gap is the network.
+4. A context-matched acceptance test for residual re-proposals (batches 5-6).
 
 Caveats:
 - **Synthetic scenes only.** The effective sample is 6 held-out scenes, one of them pathologic.
 - **vesselmap ran as `build_map` at its defaults.** On averaged stills it is outside its design (its
   README), and its junctions are typed by the adapter's rule.
-- **The development set is 5 scenes**, and the loop ran 27 tier-1 and 12 tier-2 runs on it. The held-out
+- **The development set is 5 scenes**, and the loop ran 27 tier-1 and 10 tier-2 runs on it. The held-out
   result above was measured once, after the freeze.
 - **The oracle row is a diagnostic:** it starts from the truth.
 
