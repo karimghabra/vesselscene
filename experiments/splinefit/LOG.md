@@ -283,3 +283,25 @@ levels (position), not their thresholds (detection and topology are set before t
    only) and a second halo term.
 5. parallel_g2 regressed under E3: a short positional-only final phase restricted to edge pairs closer than
    their summed calibre.
+
+## Batch 2
+
+Setup: last kept = last confirmed = 3834bb0 (E3; tier 1 0.768662, tier 2 0.760516).
+
+### E5: a vessel must have two observed flanks (pre-registered)
+
+Recording before the change (empty_average, scratch diag): the 78 px false vessel is ONE wide edge (r 7.2,
+s 7.9 px, a 0.11) laid over a dark illumination lump in the bottom-right corner of the probe, which runs into
+the invalid corner. Stage 1 masks the whole lump, so its B there is extrapolated from the brighter interior
+and the lump's OD is positive; the edge's outer flank (r + 2 s = 23 px from its centreline) lies outside the
+valid region for most of its length (centreline 12-22 px from the invalid pixels). Its MDL gain is 1580
+against a penalty of 21, and the smooth-background test (sigma 25 px) does not absorb a lump that is only
+seen from one side. Hypothesis: a vessel is a line darker than the background on BOTH sides (the even-
+symmetric receptive field of a line detector: a centre and two off-flanks); an edge whose outer flank is
+not observed is evidence of a background step at the frame, not of a vessel.
+Change: in prune(), a wide edge (r + s >= wide_test_w) is removed when fewer than half of its 1 px samples
+have both flank points (x +- n (r + 2 s)) inside the image and on valid pixels.
+Predicted: empty sweep 0.612 -> ~1.0 (empty_average 0.22 -> 1.0; +0.023 probe_score), every other probe
+unchanged (their wide vessels are flanked by background), fast crops unchanged (crops are >= 97 % valid and
+their wide vessels rarely run along the crop border; at worst a pathologic edge along the border goes:
+graph / explained down slightly there). Composite +0.008 to +0.012.

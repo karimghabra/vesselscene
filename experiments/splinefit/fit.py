@@ -74,6 +74,8 @@ class FitConfig:
     min_gain_per_px: float = 0.2    # after the corr_px scaling
     wide_test_w: float = 8.0        # px, r + s from which an edge must also beat a smooth background
     wide_bg_sigma: float = 25.0     # px, the smooth background's scale in that test
+    flank_k: float = 2.0            # a wide edge's flanks lie at r + flank_k s from its centreline ...
+    flank_min: float = 0.5          # ... and both must be observed (in the image, valid) on this fraction
     prune_free_only: bool = False   # True: only edges with a free end may be pruned
     fit_pos: bool = True            # False: geometry stays at the proposal (profiles, optics only)
     retarget: bool = True           # re-clean the target with the render's support before the final fit
@@ -204,8 +206,26 @@ def clean_topology(net: VesselNetwork):
     net.merge_joints()
 
 
-def prune(net: VesselNetwork, model: JunctionModel, cfg: FitConfig, log=None) -> list:
-    """MDL: remove edges whose gain (per corr_px) does not pay for their description. Returns removed ids."""
+def two_flanked(net: VesselNetwork, eid, ok: np.ndarray, k: float) -> float:
+    """Fraction of an edge's 1 px samples whose two flank points, x +- n (r + k s), lie in the image on valid
+    pixels. A vessel is darker than the background on BOTH sides (a line detector's centre and two off-flanks);
+    a wide 'vessel' seen from one side only is a background step at the frame's border."""
+    smp = net.sample(eid, 1.0)
+    nrm = np.stack([-smp["tan"][:, 1], smp["tan"][:, 0]], 1)
+    d = (smp["r"] + k * smp["s"])[:, None]
+    H, W = ok.shape
+    both = np.ones(len(d), bool)
+    for sgn in (1.0, -1.0):
+        q = np.round(smp["xy"] + sgn * d * nrm).astype(int)
+        inside = (q[:, 0] >= 0) & (q[:, 0] < W) & (q[:, 1] >= 0) & (q[:, 1] < H)
+        both &= inside
+        both[inside] &= ok[q[inside, 1], q[inside, 0]]
+    return float(both.mean())
+
+
+def prune(net: VesselNetwork, model: JunctionModel, cfg: FitConfig, log=None, ok: np.ndarray | None = None) -> list:
+    """MDL: remove edges whose gain (per corr_px) does not pay for their description, and wide edges whose two
+    flanks are not observed (two_flanked < flank_min; ok = the valid-data map). Returns removed ids."""
     if not model.eids:
         return []
     # two estimates: without the node-site cores (where removing an arm's additive entries is not what the
@@ -237,6 +257,8 @@ def prune(net: VesselNetwork, model: JunctionModel, cfg: FitConfig, log=None) ->
         if cfg.prune_free_only and not free:
             continue
         if gains[k] < pen or gains[k] / L < cfg.min_gain_per_px:
+            removed.append(eid)
+        elif ok is not None and k in wide and two_flanked(net, eid, ok, cfg.flank_k) < cfg.flank_min:
             removed.append(eid)
     for eid in removed:
         net.remove_edge(eid)
@@ -284,7 +306,7 @@ def fit_network(net: VesselNetwork, OD: np.ndarray, w: np.ndarray, cfg: FitConfi
         optimize(model, cfg.iters_joint, cfg, fit_pos=cfg.fit_pos, anchored=True, log=log)
         model.write_back()
         kappa = float(model.kappa().detach())
-        prune(net, model, cfg, log)
+        prune(net, model, cfg, log, ok=w > 0)
     if cfg.retarget and s1 is not None:
         with torch.no_grad():
             R = model.optical_density().numpy()
