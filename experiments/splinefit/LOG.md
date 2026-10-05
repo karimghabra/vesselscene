@@ -575,3 +575,59 @@ the same mechanism: missing arms, not mis-typed or mis-rendered ones.
 4. The CFAR detector (the review's direction 1) is still the principled replacement for the MDL prune. The
    recording says it can only pay off together with a proposal that adds recall without losing stage 8's
    junction work, so it is ranked below direction 1.
+
+## Batch 4
+
+Setup: last kept = last confirmed = b527f79 (E9; tier 1 0.785309, digest d56fee848ca3e349; tier 2 0.760603,
+digest cf65125bf2fb0dea).
+
+### Priority 1: the review's findings on E5/E6 (batch 2)
+
+**Finding 1 (the E5/E6 tier-1 gain is one shared background draw): confirmed; the size is corrected and a
+multi-seed control is added.** The battery renders every probe with imaging SEED 11 (common random numbers),
+so the bottom-right illumination lump that E5/E6 remove sits in every probe and is counted about six times.
+The batch-2 claim "+0.0166 tier 1, empty 1/2 -> 2/2" should read: roughly +0.004 to +0.006 of real probe gain
+(never worse on any seed; the thin-line false wide edges go on seeds 3 and 5 only) plus a seed-11 artifact; on
+real images E5/E6 are a near no-op (fast +0.00001, tier 2 +0.00008). New diagnostic, outside the frozen metric:
+`controls.py` re-renders six battery stimuli (empty average and frame, line_d3, line_d6_h0.25, fork_wide,
+cross_a45) with imaging seeds 1-7 (cached in `$SPLINEFIT_WORK/controls/`) and reports the mean probe_composite
+per stimulus and the false length on the empty frames. From now on a probe-only tier-1 gain counts as real only
+if it also shows on the controls. It reproduces the review's empty-average numbers for E6 exactly
+(0.072, 0.045, 1.0, 0.308, 0.560, 0.0, 0.010). Baseline (E9, b527f79, controls digest 8b1a3cba43e347d4):
+
+| control (7 seeds) | mean probe_composite | battery (seed 11) |
+|---|---|---|
+| empty_average | 0.285 (false length 81 px) | 1.000 |
+| empty_frame | 0.766 (28 px) | 1.000 |
+| line_d3 | 0.661 | 0.743 |
+| line_d6_h0.25 | 0.360 (0 on 4 of 7 seeds) | 0.80 |
+| fork_wide | 0.884 | 0.96 |
+| cross_a45 | 0.901 | 0.97 |
+| **controls_score** | **0.6427** | |
+
+So the single-seed battery overstates the negative control and the faint-line threshold badly: the averages'
+background is fitted with 44-165 px of false vessel on 6 of 7 seeds. A re-baseline of the frozen battery that
+averages each probe over several imaging seeds is the right evaluator fix, but it changes the tier-1 metric's
+scale for every past row, so it is recommended (for the bug-fix protocol at a batch boundary), not done here.
+
+**Finding 2 (E6's contrast rule is post hoc and contradicted): confirmed in substance.** flank_a = 0.1 was read
+off truth-labelled recordings of the same tier-1 data; on line_d6_h0.5 the same lump is fitted with a = 0.315
+and kept; on empty seed 5, E5 removes the lump and E6 keeps it; on tier 2 the one edge E6 removed (pathologic
+s000 average, at (258, 5)) was a badly fitted piece of a real border vessel (true a 0.37), not a lump. The
+statement "contrast separates an illumination lump at the frame from a vessel cut by the frame" is withdrawn:
+the flank test with flank_a = 0.1 is an exploratory heuristic whose measured effect is +0.004-0.006 on probes
+and ~0 on real images. It stays (it is never worse on any seed and has no tier-2 cost), but its threshold is
+not to be tuned further on the battery; a principled replacement is a CFAR test against a width-matched null
+measured on the image's own background (review direction 1), judged on the multi-seed controls.
+
+### E12: the retarget renders the pruned network, alone on E9 (pre-registered)
+
+Hypothesis: E11's fix (batch 3) was confounded with E10's stage-7 proposals when tier 2 regressed. On stage-8
+proposals the prune removes little (1.9 % of true length), so the retarget's support should change only where
+a removed edge (mostly a false lump) sat: those pixels return to B and the final fit no longer has to bend its
+neighbours' profiles around unexplained OD.
+Change: retarget's R = the render of the pruned network (one extra model build).
+Predicted: graph and pos identical (topology and geometry are set before the retarget); probes +0.001-0.003
+(line_d2.5, line_d3 explained up, as in E11); fast within +-0.001, explained about equal; composite +0.000 to
++0.002; controls: empty unchanged (no topology change), line controls' explained slightly up. Kept only if it
+reaches the threshold, or within it as a correctness fix at equal complexity.
