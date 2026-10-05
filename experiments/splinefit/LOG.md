@@ -631,3 +631,69 @@ Predicted: graph and pos identical (topology and geometry are set before the ret
 (line_d2.5, line_d3 explained up, as in E11); fast within +-0.001, explained about equal; composite +0.000 to
 +0.002; controls: empty unchanged (no topology change), line controls' explained slightly up. Kept only if it
 reaches the threshold, or within it as a correctness fix at equal complexity.
+
+E12 result (tier 1, ba7302d): composite 0.786641 (+0.00133 against E9). **Every prediction held**: graph and pos
+identical, probes +0.0024 (width and contrast sweep means; empty unchanged), fast +0.0002, width +0.0024,
+explained -0.0009. Below the 0.002 threshold and not simpler, so **discarded** by the rule (reset to 3f38019),
+although it is the consistent form of the retarget. On stage-8 proposals the retarget fix is a pure probe
+effect of about +0.001 composite. It does not explain the batch-3 tier-2 regression; that was E10.
+
+### E13: re-propose arms from the prediction error (pre-registered; review direction 1)
+
+Hypothesis (predictive coding: attention goes where error remains). Junction typing is a recall problem
+(batch 3): crossings are typed T because the 4th arm is missing, and compounds are typed crossing because the
+third vessel is missing. The missing arms are in the positive residual of the pruned network's render. Pilot
+recordings (scratch: 5 probes and 2 fast crops) shaped the change before the run:
+- Without a novelty gate, the residual readout proposes the misfit echoes along the wide vessels' flanks and
+  halo (pseudo_t, t_branch: +70-145 px of false arms at a 0.005-0.02). The gate is neuromimetic's own re_novel
+  rule: at least 2 x min_len px of the trace must lie outside the render's support (halo included; the
+  retarget's support mask).
+- The joint MDL prune keeps 40-50 px texture arms at a = 0.005-0.009 (fork_asym kept 2 of 4). A re-proposal
+  searches the whole residual, so its hypotheses pay neuromimetic's re_mdl = 20 x the description cost (the
+  look-elsewhere effect).
+- When every arm is rejected, the network reverts to its state before the re-proposal.
+Change: a new module, repropose.arms. Stages 3-6 run on max(OD - R, 0) at 1.3 x the readout thresholds and are
+merged against the network's own edges, which count as the coarsest channel. A trace is kept if it is novel
+and one of its ends lies within r + s + 6 px of an existing edge. That end attaches to the edge's node when one
+lies within the parent's lumen, else it splits the edge. Then come 40 joint iterations and a second prune (new
+arms pay 20 x), then the retarget and the final fit.
+Predicted:
+- probes about unchanged;
+- fast up where a real arm is found (pilot: pathologic average crop +0.07);
+- a no-op elsewhere;
+- composite +0.002 to +0.008;
+- the whole-image check (pathologic_s000 and healthy_s004 averages) must not regress.
+
+E13 result (tier 1, 17b48cc): composite 0.786965 (+0.00166), **discarded**. Partly held:
+- fast +0.0072, but ALL of it comes from the pathologic-average crop (+0.072: one 146 px arm, junction F1 0.35
+  -> 0.67). The other 9 crops are digest-identical.
+- probes -0.0039, from capillary_average alone (0.94 -> 0.81): a wide, faint arm (r 7.6, s 3.8, a 0.016)
+  sits on the battery's bottom-right seed-11 lump. The other 33 probes are digest-identical: the revert makes
+  the change an exact no-op wherever nothing survives.
+- whole-image check: pathologic average and frame and s004 average are EXACT no-ops. 20, 11 and 9 arms were
+  proposed and the 20 x cost rejected every one. The crop gain was a crop artifact.
+
+Recording (ORACLE diagnostic, scratch: E13 with re_mdl = 1 on two whole images; arms labelled TRUE when their
+samples lie a median <= max(3, r) px from the observable truth):
+- pathologic average: 28 arms, 13 TRUE. At 1 x, 8 TRUE and 6 false are kept. Composite 0.6472 -> 0.6494,
+  junction F1 strict 0.477 -> 0.559, recall 0.567 -> 0.593.
+- s004 average: 10 arms, 7 TRUE. The thin true capillary arms (r ~1.5, a ~0.008) are removed even at 1 x; 2
+  TRUE and 1 false are kept. Composite 0.7370 -> 0.7424.
+- No single feature (a, r, s, length) separates the kept false arms from the kept true ones, which matches
+  batch 3's finding on the prune.
+
+### E14: re-proposed arms pay the ordinary MDL cost (pre-registered; E13 without re_mdl)
+
+Hypothesis: re_mdl = 20 came from neuromimetic's additive render on a leaky target, where every residual was
+suspect. The junction-aware joint fit explains the image better, so a re-proposed arm can be judged like any
+other edge. The recording shows the 20 x cost is what made E13 a whole-image no-op.
+Change: delete re_mdl (the arms pay the same MDL test as every edge). It is simpler than E13: one parameter
+fewer.
+Predicted:
+- whole images: graph up through junction F1 (pathologic and s004 averages +0.002 and +0.005 as recorded);
+- fast: up on pathologic average, small +- elsewhere (texture arms on frames);
+- probes: down. The pilot kept 2 texture arms on fork_asym, capillary_average keeps its lump arm, and other
+  probes may gain arms on the seed-11 lumps. Probe_score -0.005 to -0.015;
+- composite -0.005 to +0.003 on tier 1, so likely below the threshold.
+If it is discarded on tier 1, the recording says it is a whole-image gain that the single-seed battery cannot
+see. The multi-seed controls would then decide whether the probe losses are lump artifacts or real false arms.

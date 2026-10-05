@@ -77,6 +77,9 @@ class FitConfig:
     flank_min: float = 0.5          # ... and both must be observed (in the image, valid) on this fraction
     flank_a: float = 0.1            # ... unless its contrast (mean a, OD) reaches this: a strong one-sided
                                     # line at the frame is a vessel cut by the frame, not an illumination lump
+    repropose: bool = True          # after the prune: arms from the positive residual (repropose.arms), refit
+    iters_rep: int = 40             # joint iterations with the new arms, then a second prune
+    re_k: float = 1.3               # x the readout thresholds of neuromimetic stage 6 on the residual
     prune_free_only: bool = False   # True: only edges with a free end may be pruned
     fit_pos: bool = True            # False: geometry stays at the proposal (profiles, optics only)
     retarget: bool = True           # re-clean the target with the render's support before the final fit
@@ -287,6 +290,21 @@ def fit_network(net: VesselNetwork, OD: np.ndarray, w: np.ndarray, cfg: FitConfi
         model.write_back()
         kappa = float(model.kappa().detach())
         prune(net, model, cfg, log, ok=w > 0)
+    if cfg.repropose and s1 is not None and net.edges:
+        from .repropose import arms
+        with torch.no_grad():                          # prediction error of the pruned network
+            R = make_model(net, OD, w, cfg, kappa).optical_density().numpy()
+        before = (net.copy(), model, kappa)
+        added = arms(net, OD, R, s1, np.sqrt(1.0 / np.maximum(w, 1e-12)), cfg.re_k)
+        log.append(dict(repropose=len(added)))
+        if added:
+            model = make_model(net, OD, w, cfg, kappa, anchored=True)
+            optimize(model, cfg.iters_rep, cfg, fit_pos=cfg.fit_pos, anchored=True, log=log)
+            model.write_back()
+            kappa = float(model.kappa().detach())
+            prune(net, model, cfg, log, ok=w > 0)
+        if not any(e.info.get("new") for e in net.edges.values()):
+            net, model, kappa = before                 # every arm rejected: the hypothesis changes nothing
     if cfg.retarget and s1 is not None:
         with torch.no_grad():
             R = model.optical_density().numpy()
