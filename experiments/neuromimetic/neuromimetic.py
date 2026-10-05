@@ -21,19 +21,20 @@ LAMBDA_PX = 11.9                        # vesselscene's lambda (truth.LAMBDA_PX)
 class Config:
     # 1. photoreceptors / horizontal cells
     saturation: float = 4095.0          # 12-bit full scale: glare carries no vessel information
-    env_radius: float = 28.0            # px, grey closing radius of the provisional upper envelope
+    env_radius: float = 60.0            # px, grey closing radius of the provisional upper envelope (> widest half lumen)
     bg_sigma: float = 8.0               # px, masked normalised convolution of the background
     bg_iters: int = 2
     mask_z: float = 2.0                 # band CNR above which a pixel is vessel (mask for the background)
     mask_dilate: int = 2                # px
     # 2. ganglion cells
-    bands: tuple = (1.0, 2.0, 4.0, 8.0, 16.0)
+    bands: tuple = (1.0, 2.0, 4.0, 8.0, 16.0, 32.0)
     rms_sigma: float = 24.0             # px, window of the local contrast (RMS) estimate
     # 3. simple cells
     n_orient: int = 16
-    scales: tuple = (1.5, 2.1, 3.0, 4.2, 6.0, 8.5, 12.0, 17.0)
-    channels: tuple = ((0, 1, 2), (3, 4), (5, 6, 7))   # scale indices of the fine, medium, coarse channels
-    elong: float = 3.0
+    scales: tuple = (1.5, 2.1, 3.0, 4.2, 6.0, 8.5, 12.0, 17.0, 24.0)
+    channels: tuple = ((0, 1, 2), (3, 4), (5, 6, 7, 8))   # scale indices of the fine, medium, coarse channels
+    chan_factor: tuple = (1, 2, 4)      # each channel is computed on a grid downsampled this much (stages 3-5)
+    elong: tuple = (3.0, 2.5, 2.0)      # along / across std ratio per channel (coarse: shorter, fewer star rays)
     odd_alpha: float = 0.7
     # 4. non-classical surround
     surround: bool = True
@@ -52,6 +53,7 @@ class Config:
     tracker: bool = True                # tangent tracker (else skeletons of SE(2) components)
     look_px: int = 3                    # the tracker looks this far ahead (bridging 1-2 px gaps)
     pass_px: int = 4                    # ... and passes through another trace's claim for at most this long
+    claim_k: float = 0.5                # a sample claims +-max(1, claim_k sigma) px across (its lumen)
     spur_len: float = 5.0               # px, terminal skeleton branches shorter than this (+ width) are cut
     # 7. graph assembly
     gap_att: float = 6.0                # px beyond the other vessel's half width an end may attach
@@ -65,6 +67,7 @@ class Config:
     pass_k: float = 0.0                 # traces passing within pass_k R of a junction add their arms
     arm_min: float = 6.0                # px, shortest arm counted
     cross_turn_deg: float = 40.0        # a crossing's through pairs turn at most this much
+    compound_r: float = 20.0            # px: a junction region at least this large is typed compound (dev prior)
     od_width: bool = True               # vessel widths from OD cross-sections (else 2.5 x the filter scale)
     # 8. iterative refinement
     verify: bool = True
@@ -72,7 +75,8 @@ class Config:
     repropose: bool = True
     re_k: float = 1.0                   # thresholds of the re-proposal readout, x t_high / t_low
     corr_px: float = 6.0                # px^2, correlation area of the OD noise (texture) for the gains
-    mdl_k: float = 20.0                 # description cost of an edge: mdl_k (1 + length / mdl_len)
+    mdl_k: float = 2.0                  # description cost of an edge: mdl_k (1 + length / mdl_len)
+    cnr_min: float = 2.0                # an edge's rendered profile must reach this band CNR
     mdl_len: float = 20.0
 
 
@@ -248,41 +252,83 @@ def simple_cells(OD: np.ndarray, bg: np.ndarray, cfg: Config = DEFAULT) -> list:
     lives in the fine channel, where the vein's flat floor gives no response, whereas a single max over all
     scales lets the vein's broad orientation tuning swamp it.
     Returns [dict(U (n_orient, H, W), S (scale index into cfg.scales), sigma (the channel's typical scale))]."""
-    H, W = OD.shape
+    H0, W0 = OD.shape
     th = orientations(cfg)
-    smax = max(cfg.scales)
-    P = int(min(math.ceil(3 * cfg.elong * smax), H - 1, W - 1))
-    X = np.pad(OD.astype(np.float32), P, mode="reflect")
-    Hp, Wp = sfft.next_fast_len(X.shape[0], real=True), sfft.next_fast_len(X.shape[1], real=True)
-    F = sfft.rfft2(X, s=(Hp, Wp), workers=FFT_WORKERS).astype(np.complex64)
-    wy = (2 * np.pi * sfft.fftfreq(Hp)).astype(np.float32)[:, None]
-    wx = (2 * np.pi * sfft.rfftfreq(Wp)).astype(np.float32)[None, :]
     out = []
-    for chan in cfg.channels:
+    elongs = cfg.elong if isinstance(cfg.elong, tuple) else (cfg.elong,) * len(cfg.channels)
+    for ci, (chan, el) in enumerate(zip(cfg.channels, elongs)):
+        f = int(cfg.chan_factor[ci]) if ci < len(cfg.chan_factor) else 1
+        Xc, bgc = _down(OD, f), (_down(bg.astype(np.float32), f) > 0.5) if f > 1 else bg
+        H, W = Xc.shape
+        smax = max(cfg.scales[i] for i in chan) / f
+        P = int(min(math.ceil(3 * el * smax), H - 1, W - 1))
+        X = np.pad(Xc.astype(np.float32), P, mode="reflect")
+        Hp, Wp = sfft.next_fast_len(X.shape[0], real=True), sfft.next_fast_len(X.shape[1], real=True)
+        F = sfft.rfft2(X, s=(Hp, Wp), workers=FFT_WORKERS).astype(np.complex64)
+        wy = (2 * np.pi * sfft.fftfreq(Hp)).astype(np.float32)[:, None]
+        wx = (2 * np.pi * sfft.rfftfreq(Wp)).astype(np.float32)[None, :]
         U = np.full((len(th), H, W), -np.inf, np.float32)
         S = np.zeros((len(th), H, W), np.uint8)
         for si in chan:
-            s = cfg.scales[si]
+            s = cfg.scales[si] / f
             E = np.empty((len(th), H, W), np.float32)
             O = np.empty((len(th), H, W), np.float32)
             for k, t in enumerate(th):
                 c, sn = np.float32(math.cos(t)), np.float32(math.sin(t))
                 wn = -wx * sn + wy * c
                 wt = wx * c + wy * sn
-                G = np.exp(-0.5 * (s * s) * (wn * wn + (cfg.elong ** 2) * wt * wt)).astype(np.float32)
+                G = np.exp(-0.5 * (s * s) * (wn * wn + (el ** 2) * wt * wt)).astype(np.float32)
                 e = sfft.irfft2(F * ((s * s) * wn * wn * G), s=(Hp, Wp), workers=FFT_WORKERS)
                 o = sfft.irfft2(F * (1j * s * wn * G).astype(np.complex64), s=(Hp, Wp), workers=FFT_WORKERS)
                 E[k] = e[P:P + H, P:P + W]
                 O[k] = o[P:P + H, P:P + W]
-            ws = max(cfg.rms_sigma, 4 * s)
-            re = _local_rms_stack(E, bg, ws)
-            ro = _local_rms_stack(O, bg, ws)
+            ws = max(cfg.rms_sigma, 4 * cfg.scales[si]) / f
+            re = _local_rms_stack(E, bgc, ws)
+            ro = _local_rms_stack(O, bgc, ws)
             Z = E / re[None] - cfg.odd_alpha * np.abs(O) / ro[None]
             better = Z > U
             U = np.where(better, Z, U)
             S[better] = si
-        out.append(dict(U=U, S=S, sigma=float(np.exp(np.mean(np.log([cfg.scales[i] for i in chan]))))))
+        out.append(dict(U=U, S=S, f=f, shape=(H0, W0),
+                        sigma=float(np.exp(np.mean(np.log([cfg.scales[i] for i in chan]))))))
     return out
+
+
+def _down(X: np.ndarray, f: int) -> np.ndarray:
+    """Area average over f x f blocks (borders reflected up to a multiple of f)."""
+    if f == 1:
+        return X
+    H, W = X.shape
+    h, w = -(-H // f), -(-W // f)
+    Xp = cv2.copyMakeBorder(np.asarray(X, np.float32), 0, h * f - H, 0, w * f - W, cv2.BORDER_REFLECT)
+    return cv2.resize(Xp, (w, h), interpolation=cv2.INTER_AREA)
+
+
+def _up(X: np.ndarray, f: int, shape, nearest: bool = False) -> np.ndarray:
+    """Back to the full grid (the pixel centres of _down: bilinear, or nearest for labels), per layer."""
+    if f == 1:
+        return X
+    H, W = shape
+    h, w = X.shape[-2:]
+    interp = cv2.INTER_NEAREST if nearest else cv2.INTER_LINEAR
+    return np.stack([cv2.resize(x, (w * f, h * f), interpolation=interp)[:H, :W] for x in X])
+
+
+def _channel_traces(OD: np.ndarray, bg: np.ndarray, ok: np.ndarray, cfg: Config, t_high=None, t_low=None,
+                    keep: list | None = None) -> list:
+    """Stages 3-6 for every channel: simple cells, surround, association field (at the channel's grid), and
+    the readout on the full grid."""
+    traces = []
+    for ci, ch in enumerate(simple_cells(OD, bg, cfg)):
+        f = ch["f"]
+        U = surround(ch["U"], ch["sigma"], cfg, f) if cfg.surround else ch["U"]
+        C = association_field(U, ch["sigma"], cfg, f) if cfg.association else np.maximum(U, 0)
+        C, S = _up(C, f, ch["shape"]), _up(ch["S"], f, ch["shape"], nearest=True)
+        if keep is not None:
+            keep.append(dict(C=C, S=S, sigma=ch["sigma"]))
+        ro = readout if cfg.tracker else _readout_skel
+        traces += ro(C, S, cfg, t_high=t_high, t_low=t_low, chan=ci, valid=ok)
+    return traces
 
 
 def _local_rms_stack(E: np.ndarray, bg: np.ndarray, s: float) -> np.ndarray:
@@ -309,7 +355,7 @@ def _corr(X: np.ndarray, K: np.ndarray, anchor) -> np.ndarray:
     return cv2.filter2D(X, cv2.CV_32F, K, anchor=anchor, borderType=cv2.BORDER_CONSTANT)
 
 
-def surround(U: np.ndarray, sigma: float, cfg: Config = DEFAULT) -> np.ndarray:
+def surround(U: np.ndarray, sigma: float, cfg: Config = DEFAULT, f: int = 1) -> np.ndarray:
     """Stage 4, the non-classical receptive field: cross-orientation and iso-orientation (flank) suppression.
 
     Biology: a V1 cell's response is divided (normalised) by the pooled activity of cells of all orientations
@@ -330,9 +376,9 @@ def surround(U: np.ndarray, sigma: float, cfg: Config = DEFAULT) -> np.ndarray:
     if cfg.flank_k <= 0:
         return out
     th = orientations(cfg)
-    d1 = 2.5 * sigma + 1.0
-    d2 = d1 + max(6.0, 1.5 * sigma)
-    step = max(1.0, sigma / 2)
+    d1 = (2.5 * sigma + 1.0) / f                      # px of the channel's grid (downsampled f x)
+    d2 = d1 + max(6.0, 1.5 * sigma) / f
+    step = max(1.0, sigma / 2 / f)
     ds = np.arange(d1, d2 + 0.5 * step, step)
     us = np.arange(-1.5 * step, 1.5 * step + 0.01, step)
     for k, t in enumerate(th):
@@ -346,7 +392,7 @@ def surround(U: np.ndarray, sigma: float, cfg: Config = DEFAULT) -> np.ndarray:
 
 
 # ======================================================================== 5. association field
-def association_field(U: np.ndarray, sigma: float, cfg: Config = DEFAULT) -> np.ndarray:
+def association_field(U: np.ndarray, sigma: float, cfg: Config = DEFAULT, f: int = 1) -> np.ndarray:
     """Stage 5, horizontal connections in V1: the association field as a deterministic diffusion in (x, y,
     theta).
 
@@ -366,7 +412,7 @@ def association_field(U: np.ndarray, sigma: float, cfg: Config = DEFAULT) -> np.
     th = orientations(cfg)
     U0 = np.maximum(U, 0)
     g = float(cfg.assoc_gain)
-    ell = cfg.assoc_len * math.sqrt(max(1.0, sigma / 2.0))
+    ell = cfg.assoc_len * math.sqrt(max(1.0, sigma / 2.0)) / f      # on the channel's grid
     ds = np.arange(1.0, 3 * ell + 0.5, 1.0)
     w = np.exp(-ds ** 2 / (2 * ell ** 2))
     kern = []
@@ -533,7 +579,8 @@ def readout(C: np.ndarray, S: np.ndarray, cfg: Config = DEFAULT, t_high=None, t_
     takes the straighter branch at a fork; it looks up to look_px ahead (1-2 px gaps), passes through another
     trace's claim for at most pass_px samples (a shallow crossing) and stops where no candidate continues it
     or where it keeps running along another trace (a T or a merge: the end is put at the first contact).
-    Each accepted sample claims its position and the lateral +-1 px in layers k, k+-1. Traces shorter than min_len are dropped; the rest are smoothed and
+    Each accepted sample claims its position and +-max(1, claim_k sigma) px across it in layers k, k+-1
+    (its lumen: no second trace runs inside a wide vessel). Traces shorter than min_len are dropped; the rest are smoothed and
     resampled at 1 px. Returns traces: dicts with xy (n, 2), c (strength), w (2.5 sigma of the selected
     scale), chan."""
     t_high = cfg.t_high if t_high is None else t_high
@@ -561,9 +608,10 @@ def readout(C: np.ndarray, S: np.ndarray, cfg: Config = DEFAULT, t_high=None, t_
 
     def claim(k, y, x, tid):
         nx, ny = -TY[k], TX[k]
+        lat = max(1, int(round(cfg.claim_k * sig[S[k, y, x]])))
         for dk in (-1, 0, 1):
             kk = (k + dk) % n
-            for o in (-1, 0, 1):
+            for o in range(-lat, lat + 1):
                 yy, xx = int(round(y + o * ny)), int(round(x + o * nx))
                 if 0 <= yy < H and 0 <= xx < W and owner[kk, yy, xx] < 0:
                     owner[kk, yy, xx] = tid
@@ -694,53 +742,66 @@ def _tangents(P: np.ndarray, k: int = 3) -> np.ndarray:
     return v / np.maximum(np.hypot(*v.T), 1e-9)[:, None]
 
 
-def merge_channels(traces: list, cfg: Config = DEFAULT, accepted: list | None = None) -> list:
-    """Merge the traces of the spatial-frequency channels: strongest first, a point is dropped where an
-    accepted trace runs parallel (< 20 deg) within 3 px, or parallel (< 10 deg) within 0.6 of its width when
-    that trace is from a coarser channel (the wall echoes of a wide vein; a thin vessel crossing the vein at a
-    shallow angle is kept); the uncovered runs of at least min_len are kept."""
-    from scipy.spatial import cKDTree
+def merge_channels(traces: list, cfg: Config = DEFAULT, accepted: list | None = None, shape=None) -> list:
+    """Merge the traces of the spatial-frequency channels (and new proposals into accepted traces):
+    strongest first, a point is dropped where an accepted trace runs parallel (< 20 deg) within 3 px, or
+    parallel (< 10 deg) within 0.6 of its width when that trace is from a coarser channel (the wall echoes of
+    a wide vein; a thin vessel crossing the vein at a shallow angle is kept); the uncovered runs of at least
+    min_len are kept. Coverage is drawn into rasters per orientation bin (16 bins of 11.25 deg)."""
+    acc = list(accepted or [])
+    allxy = [t["xy"] for t in acc + list(traces)]
+    if not allxy:
+        return acc
+    if shape is None:
+        mx = np.concatenate(allxy).max(0)
+        shape = (int(mx[1]) + 2, int(mx[0]) + 2)
+    H, W = shape
+    nb = 16
+    dup = np.zeros((nb, H, W), np.uint8)              # any accepted trace within 3 px
+    wall = np.zeros((nb, H, W), np.uint8)             # 1 + the coarsest channel covering within 0.6 w
+
+    def draw(t):
+        P, Tg = t["xy"], _tangents(t["xy"])
+        ch = int(t.get("chan", 0)) + 1
+        hw = int(round(max(3.0, 0.6 * float(np.median(t["w"])))))
+        bins = np.round(np.mod(np.arctan2(Tg[:, 1], Tg[:, 0]), np.pi) / (np.pi / nb)).astype(int) % nb
+        for i in range(0, len(P) - 1, 3):
+            j = min(i + 3, len(P) - 1)
+            a_, b_ = tuple(np.round(P[i]).astype(int)), tuple(np.round(P[j]).astype(int))
+            k = int(bins[i])
+            cv2.line(dup[k], a_, b_, 1, 7)
+            if hw > 3:
+                sub = wall[k]
+                m = np.zeros_like(sub)
+                cv2.line(m, a_, b_, 1, 2 * hw + 1)
+                np.maximum(sub, m * ch, out=sub)
+
+    for t in acc:
+        draw(t)
     order = sorted(range(len(traces)), key=lambda i: (-float(np.mean(traces[i]["c"])),
                                                       float(traces[i]["xy"][0, 0]), float(traces[i]["xy"][0, 1])))
-    cos_par, cos_wall = math.cos(math.radians(20.0)), math.cos(math.radians(10.0))
-    acc, A_xy, A_t, A_w, A_ch = list(accepted or []), [], [], [], []
-    tree = None
-    if acc:
-        A_xy = np.concatenate([a["xy"] for a in acc])
-        A_t = np.concatenate([_tangents(a["xy"]) for a in acc])
-        A_w = np.concatenate([a["w"] for a in acc])
-        A_ch = np.concatenate([np.full(len(a["xy"]), a.get("chan", 0)) for a in acc])
-        tree = cKDTree(A_xy)
     for i in order:
         t = traces[i]
         P = t["xy"]
         Tg = _tangents(P)
+        ix = np.clip(np.round(P).astype(int), 0, [W - 1, H - 1])
+        bins = np.round(np.mod(np.arctan2(Tg[:, 1], Tg[:, 0]), np.pi) / (np.pi / nb)).astype(int) % nb
+        ch = int(t.get("chan", 0)) + 1
         cov = np.zeros(len(P), bool)
-        if tree is not None:
-            rmax = max(3.0, 0.6 * float(np.max(A_w)))
-            for k, lst in enumerate(tree.query_ball_point(P, rmax)):
-                for q in lst:
-                    d = math.hypot(*(P[k] - A_xy[q]))
-                    c = abs(float(np.dot(Tg[k], A_t[q])))
-                    if (d <= 3.0 and c >= cos_par) or (A_ch[q] > t["chan"] and d <= 0.6 * A_w[q] and c >= cos_wall):
-                        cov[k] = True
-                        break
-        keep = ~cov
-        lab, nl = ndi.label(keep)
-        added = False
+        for d in (-2, -1, 0, 1, 2):
+            kb = (bins + d) % nb
+            cov |= dup[kb, ix[:, 1], ix[:, 0]] > 0
+            if abs(d) <= 1:
+                cov |= wall[kb, ix[:, 1], ix[:, 0]] > ch
+        lab, nl = ndi.label(~cov)
         for r in range(1, nl + 1):
             ii = np.flatnonzero(lab == r)
             if len(ii) < cfg.min_len:
                 continue
-            piece = {k_: (v[ii[0]:ii[-1] + 1].copy() if isinstance(v, np.ndarray) else v) for k_, v in t.items()}
+            piece = {k_: (v[ii[0]:ii[-1] + 1].copy() if isinstance(v, np.ndarray) and len(v) == len(P) else v)
+                     for k_, v in t.items()}
             acc.append(piece)
-            added = True
-        if added:
-            A_xy = np.concatenate([a["xy"] for a in acc])
-            A_t = np.concatenate([_tangents(a["xy"]) for a in acc])
-            A_w = np.concatenate([a["w"] for a in acc])
-            A_ch = np.concatenate([np.full(len(a["xy"]), a.get("chan", 0)) for a in acc])
-            tree = cKDTree(A_xy)
+            draw(piece)
     return acc
 
 
@@ -1079,7 +1140,9 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
     stretches leaving the disc, at least arm_min long: 3 arms is a 3-way junction ('pseudo-T' by default),
     4 arms that pair into two straight lines (turn < cross_turn_deg; a trace passing through pairs its own
     two arms) at clearly different orientations a 'crossing', otherwise (4 unpaired, 5 or more) a
-    'compound'; with fewer than 3 arms there is no junction. A trace ending on another is extended to its
+    'compound'; with fewer than 3 arms there is no junction. A junction whose region is at least compound_r
+    in radius is typed 'compound' whatever its traced arms (on dev, 81 % of such regions are compounds in the
+    truth: wide vessels gather lines that are too faint to trace). A trace ending on another is extended to its
     attachment point, then every trace is cut at its point nearest each of its junctions (where the truth's
     edges end too), so each polyline runs junction to junction. Returns (edges: [dict(xy, c, w, j=(j0,
     j1))], junctions: [dict(x, y, r, type, arms, tids)], traces)."""
@@ -1133,7 +1196,10 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
         arms = _arms(traces, tids, c, R, cfg)
         if len(arms) < 3:
             continue
-        junctions.append(dict(x=float(c[0]), y=float(c[1]), r=float(R), type=_type_of(arms, cfg), arms=arms,
+        typ = _type_of(arms, cfg)
+        if R >= cfg.compound_r:                       # a region this large gathers more lines than are traced
+            typ = "compound"
+        junctions.append(dict(x=float(c[0]), y=float(c[1]), r=float(R), type=typ, arms=arms, geom=_type_of(arms, cfg),
                               tids=tids, strength=float(np.mean([traces[i]["c"].mean() for i in tids]))))
     ext = {}
     for e in ev:
@@ -1291,36 +1357,64 @@ class _Render:
         return (self.t - self.R).reshape(self.shape).astype(np.float32)
 
 
-def _mdl_prune(OD, sigma2, edges, cfg):
-    """Greedy MDL: fit every edge's amplitude against the others (two Gauss-Seidel sweeps), then remove, one
-    at a time, the edge whose gain falls shortest of its description cost mdl_k (1 + length / mdl_len),
-    re-fitting its overlapping neighbours, until every edge pays for itself."""
+def _band_resp(r: float, s: float, bands) -> np.ndarray:
+    """Centre response of a unit-peak blurred box (half width r, blur s) in the DoG bands G_b - G_2b, across
+    the vessel (stage 2's channels): h [(2 Phi(r / sqrt(s^2 + b^2)) - 1) - (2 Phi(r / sqrt(s^2 + 4 b^2)) - 1)]
+    with h = 1 / (2 Phi(r / s) - 1)."""
+    from scipy.special import ndtr
+    b = np.asarray(bands, float)
+    h = 1.0 / max(2 * ndtr(r / s) - 1, 1e-6)
+    return h * (2 * ndtr(r / np.sqrt(s * s + b * b)) - 2 * ndtr(r / np.sqrt(s * s + 4 * b * b)))
+
+
+def _mdl_prune(OD, sigma2, edges, cfg, rms=None):
+    """Greedy MDL with a visibility floor: fit every edge's amplitude against the others (two Gauss-Seidel
+    sweeps: explaining away), then remove, one at a time, the edge that falls furthest short of either test,
+    re-fitting its overlapping neighbours, until every edge passes both:
+      gain >= mdl_k (1 + length / mdl_len)   (the squared residual it removes pays for its description), and
+      CNR = a max_b resp_b(r, s) / RMS_b >= cnr_min   (its rendered profile, in stage 2's band b, against the
+      local background RMS of that band along it: the band-matched visibility the truth itself uses)."""
     rd = _Render(OD, sigma2, edges, cfg)
     n = len(edges)
     for _ in range(2):
         for k in range(n):
             rd.set_amp(k, rd.gain(k)[1])
     cost = np.array([cfg.mdl_k * (1.0 + _plen(e["xy"]) / cfg.mdl_len) for e in edges])
-    g = np.array([rd.gain(k)[0] for k in range(n)])
-    owner = {}
-    for k, (idx, _) in enumerate(rd.tubes):
-        owner[k] = set(idx.tolist()) if len(idx) < 200000 else set()
+    H, W = OD.shape
+    if rms is not None and cfg.cnr_min > 0:
+        bands = sorted(rms)
+        unit = np.zeros(n)
+        for k, e in enumerate(edges):
+            ix = np.clip(np.round(e["xy"]).astype(int), 0, [W - 1, H - 1])
+            noise = np.array([float(np.median(rms[b][ix[:, 1], ix[:, 0]])) for b in bands])
+            unit[k] = float(np.max(_band_resp(e["r"], e["s"], bands) / np.maximum(noise, 1e-6)))
+    else:
+        unit = np.full(n, np.inf)
+
+    def value(k):
+        g, a = rd.gain(k)
+        return min(g / cost[k], a * unit[k] / cfg.cnr_min if cfg.cnr_min > 0 else np.inf)
+
+    v = np.array([value(k) for k in range(n)])
+    bb = np.array([(idx.min() // W, idx.max() // W, (idx % W).min(), (idx % W).max()) if len(idx) else (0, -1, 0, -1)
+                   for idx, _ in rd.tubes]).reshape(-1, 4)
     while True:
-        cand = np.flatnonzero(rd.alive & (g < cost))
+        cand = np.flatnonzero(rd.alive & (v < 1.0))
         if not len(cand):
             break
-        k = int(cand[np.lexsort((cand, g[cand] - cost[cand]))[0]])
+        k = int(cand[np.lexsort((cand, v[cand]))[0]])
         rd.set_amp(k, 0.0)
         rd.alive[k] = False
-        g[k] = np.inf
-        for j in np.flatnonzero(rd.alive):
-            if owner[j] & owner[k]:
-                gj, aj = rd.gain(j)
-                rd.set_amp(j, aj)
-                g[j] = rd.gain(j)[0]
+        v[k] = np.inf
+        near = rd.alive & (bb[:, 0] <= bb[k, 1]) & (bb[:, 1] >= bb[k, 0]) & (bb[:, 2] <= bb[k, 3]) & (bb[:, 3] >= bb[k, 2])
+        sk = set(rd.tubes[k][0].tolist())
+        for j in np.flatnonzero(near):
+            if not sk.isdisjoint(rd.tubes[j][0].tolist()):
+                rd.set_amp(j, rd.gain(j)[1])
+                v[j] = value(j)
     for k in range(n):
         edges[k]["a"] = float(rd.a[k])
-        edges[k]["gain"] = float(g[k]) if rd.alive[k] else 0.0
+        edges[k]["cnr"] = float(rd.a[k] * unit[k])
     return rd.alive.tolist(), rd
 
 
@@ -1398,17 +1492,12 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
         edges, junctions, traces = end_stopping(traces, cfg, OD)
         for e in edges:
             e["a"], e["r"], e["s"] = fit_profile(OD, e["xy"], e["w"])
-        keep, rd = _mdl_prune(OD, sig2, edges, cfg)
+        keep, rd = _mdl_prune(OD, sig2, edges, cfg, s1.get("rms"))
         traces = _remove_ranges(traces, edges, keep, cfg)
         if rnd < cfg.rounds and cfg.repropose:
             res = rd.residual()
-            new = []
-            for ci, ch in enumerate(simple_cells(res, bg, cfg)):
-                U = surround(ch["U"], ch["sigma"], cfg) if cfg.surround else ch["U"]
-                C = association_field(U, ch["sigma"], cfg) if cfg.association else np.maximum(U, 0)
-                new += readout(C, ch["S"], cfg, chan=ci, t_high=cfg.t_high * cfg.re_k, t_low=cfg.t_low * cfg.re_k,
-                               valid=s1["ok"])
-            traces = merge_channels(new, cfg, accepted=traces)
+            new = _channel_traces(res, bg, s1["ok"], cfg, t_high=cfg.t_high * cfg.re_k, t_low=cfg.t_low * cfg.re_k)
+            traces = merge_channels(new, cfg, accepted=traces, shape=OD.shape)
     edges, junctions, traces = end_stopping(traces, cfg, OD)
     for k, J in enumerate(junctions):
         J["id"] = k
@@ -1436,17 +1525,10 @@ def _output(edges, junctions):
 def propose(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT) -> dict:
     """Stages 1-6: the cleaned OD target and the traces of every channel, merged."""
     s1 = photoreceptors(image, valid, cfg)
-    chans = simple_cells(s1["OD"], s1["bg"], cfg)
-    traces = []
-    for ci, ch in enumerate(chans):
-        U = ch["U"]
-        if cfg.surround:
-            U = surround(U, ch["sigma"], cfg)
-        C = association_field(U, ch["sigma"], cfg) if cfg.association else np.maximum(U, 0)
-        ch["C"] = C
-        ro = readout if cfg.tracker else _readout_skel
-        traces += ro(C, ch["S"], cfg, chan=ci, valid=s1["ok"])
-    return dict(s1=s1, chans=chans, traces=merge_channels(traces, cfg))
+    s1["rms"] = ganglion_cells(s1["OD"], s1["bg"], cfg)["rms"]
+    chans = []
+    traces = _channel_traces(s1["OD"], s1["bg"], s1["ok"], cfg, keep=chans)
+    return dict(s1=s1, chans=chans, traces=merge_channels(traces, cfg, shape=s1["OD"].shape))
 
 
 def run(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, debug: dict | None = None,
