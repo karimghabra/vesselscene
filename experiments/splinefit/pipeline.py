@@ -4,7 +4,10 @@
    cleaned target OD = B - log I (stage 1, background fitted on the vesselness mask's negative), traced
    vessels cut at typed junctions, OD profiles along them, and the texture variance map of its stage 8.
 2. proposals.build_network turns the proposal into a spline network (nodes at forks / compounds / free ends,
-   crossings pass through without a node).
+   crossings pass through without a node). The coarse channel (coarse.py; Config.coarse) adds free DEEP
+   edges read out from a target whose background also excludes coarse ridges; that coarse mask is used
+   again by the retarget (3), so the final fit sees the deep vessels' OD. Joint fit and MDL stay on stage 1's
+   target (a cleaner target early drags the centrelines: E1).
 3. fit.fit_network fits the junction-aware render (render.JunctionModel) jointly to the whole image's OD,
    precision-weighted, MDL-prunes, re-cleans the target with the render's support (retarget) and refits.
 4. The result is exported in the scorer's contract (experiments/splinefit/score.py): every edge cut at the
@@ -38,6 +41,7 @@ use_vesselmap()
 class Config:
     fit: FitConfig = field(default_factory=FitConfig)
     nm_verify: bool = True          # use the neuromimetic stage-8 (pruned) graph as the proposal
+    coarse: bool = True             # coarse channel: ridges out of B, deep edges proposed (coarse.py)
     step: float = 0.5               # px, sample spacing of the exported edges
 
 
@@ -103,13 +107,20 @@ def annotate_cfg(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, de
     image = np.asarray(image, np.float32)
     valid = np.asarray(valid, bool)
     dbg, s1, sig2 = _propose(image, valid, cfg)
+    s1c = s1                        # the retarget's stage 1 (the coarse ridges in its mask)
+    if cfg.coarse:
+        from .coarse import coarse_stage1
+        s1c = coarse_stage1(s1)
     OD = s1["OD"].astype(np.float32)
     w = precision(OD, s1["ok"], s1["bg"], sig2)
     t1 = time.time()
     net, info = build_network(dbg, OD.shape)
+    if cfg.coarse:
+        from .coarse import deep_edges
+        deep_edges(net, s1c)
     log = []
     if net.edges:
-        model, net, OD = fit_network(net, OD, w, cfg.fit, log, s1=s1)
+        model, net, OD = fit_network(net, OD, w, cfg.fit, log, s1=s1c)
     else:
         model = None
     t2 = time.time()

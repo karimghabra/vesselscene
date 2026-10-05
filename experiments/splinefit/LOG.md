@@ -971,3 +971,121 @@ crossing_width 0.907 -> 0.919 (fuller target on thin lines; line_d2.5 0.64 -> 0.
    leaves an over-predicted centre; a fork fitted as a crossing an under-predicted one). Pre-register on the
    tier-2 confusion counts.
 5. Recommend (unchanged) the evaluator re-baseline that averages the battery over imaging seeds.
+
+## Batch 6
+
+Setup: last kept = last confirmed = ffc8257 (E14; tier 1 0.788423; tier 2 0.760839); pushed head 1ce2bf1.
+
+### Priority 1: the review's findings on E14 (both confirmed; fixed)
+
+Finding 1 (E14's keep rests on one crop; tier 2 is a statistical zero). Re-computed with the new paired
+test (`paired.py`, outside the frozen metric) from runs/e9_tier2.json and runs/e14_tier2.json:
+- tier 2 (10 images): mean +0.00024, SE 0.00127, t +0.19, 7 up / 3 down (s000 average -0.0062,
+  pathologic frame -0.0053, s008 average -0.0031), leave-one-out range [-0.0003, +0.0010];
+- tier 1 fast crops: mean +0.0126, SE 0.0075, t +1.7; the gain rests on the pathologic-average crop
+  (+0.073), as the review says.
+Confirmed. E14 is re-labelled PROVISIONAL: `FitConfig.repropose` now defaults to False (R0, ff0a51f), which is
+the E9 pipeline exactly (the re-proposal branch is the only code E14 added to the fit path). The module stays
+for a future calibrated acceptance test.
+
+Finding 2 (the kept change mostly adds false vessels; the negative controls got worse). Confirmed from the
+batch-4 recordings already in LOG (controls_score 0.6427 -> 0.6056, 10 of 42 control fits worse, none
+better; precision down on 10 of 10 tier-2 images). Fixed by R0 and by two charter changes in program.md:
+- keep rule: a change that adds/removes edges or moves a probe must run the multi-seed controls; a fall of
+  controls_score or new false length on the empty controls is a VETO; the tier-1 gain must survive leaving
+  any one crop out (paired.py's leave-one-out range above 0);
+- tier-2 confirm rule: paired per-image test against the last confirmed run; CONFIRMED only when
+  mean > 2 SE; non-inferior added code is provisional (off by default or reset); mean < -2 SE resets.
+
+### E18: a coarse 'magnocellular' channel, used twice (pre-registered; direction 1)
+
+Hypothesis: on s004 and pathologic, stage 1's background (a fine-scale band-CNR mask, B a masked mean at
+8 px) is fitted ON deep, blurred vessels, so the target has lost 18-36 % of the true OD before any fit
+(tier2diag). One coarse orientation-selective detector (Hessian ridges of log I at sigma 4-16 px, elongation
+gated; the review's pilot b6review/coarse_mask.py) (a) is OR-ed into the background mask, so B is still
+estimated only on the mask's negative, and (b) its causes are proposed: the coarse channel of neuromimetic
+stages 3-6 on the new target, traces novel against the proposed network added as free DEEP edges (no node
+where they pass under a sharp vessel). The joint fit and the MDL / wide / flank tests judge them.
+Change: coarse.py + Config.coarse (pipeline, 7 lines). One variable (the coarse channel), two uses that
+must not be separated (the review: (a) without (b) collapses pathologic pos).
+Predicted:
+- tier 1: fast crops about unchanged (+-0.003; few deep vessels in 256 px crops), probes about unchanged
+  (no deep vessels; the gate should flag nothing on the empty probes, but wide line probes may gain a
+  coarse ridge); composite +-0.003. Controls must not regress (veto);
+- tier 2 (the judge): s004 and pathologic: target_fidelity / target_keep up, explained up, recall and
+  junction F1 up (deep vessels are missing crossing arms), coarse type balance up; width may fall (the
+  deep edges are wide and poorly identifiable); s000/s007/s008 within +-0.002.
+Pilot before the commit (scratch b6/pilot.py, whole images, scored against E9's tier-2 rows; truth only in
+the scorer). Two placements of the new target:
+
+| variant | image | composite | graph | pos | width | explained | prec / rec | jf1 | type | target_fid | deep kept |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| E9 | s004 average | 0.7370 | 0.672 | 0.764 | 0.740 | 0.902 | 0.939 / 0.671 | 0.687 | 0.600 | 0.921 | - |
+| early (whole fit on it) | s004 average | 0.7436 | 0.665 | 0.736 | 0.767 | 0.964 | 0.925 / 0.706 | 0.642 | 0.583 | 0.976 | 2 |
+| late (retarget only) | s004 average | **0.7600** | 0.680 | 0.776 | 0.803 | 0.942 | 0.943 / 0.685 | 0.635 | 0.674 | 0.969 | 2 |
+| E9 | pathologic average | 0.6472 | 0.581 | 0.680 | 0.729 | 0.733 | 0.885 / 0.567 | 0.477 | 0.625 | 0.766 | - |
+| early | pathologic average | 0.6573 | 0.585 | **0.597** | 0.758 | 0.833 | 0.839 / 0.600 | 0.535 | 0.557 | 0.848 | 5 |
+| late | pathologic average | 0.6499 | 0.575 | 0.667 | 0.755 | 0.753 | 0.884 / 0.573 | 0.450 | 0.617 | 0.855 | 2 |
+
+The early placement repeats E1 (pos -0.08 on pathologic: the sharp centrelines move toward the deep OD
+before the deep edges explain it). The LATE placement (deep edges proposed from the coarse target and
+judged by the joint fit / MDL on stage 1's target; the coarse mask enters at the retarget, geometry frozen)
+is the committed E18. Pilot prediction for tier 2: s004 +0.01..+0.02, pathologic about +0.003, others ~0.
+
+E18 result (tier 1, 31b95c0): composite 0.793358 (+0.0080 against R0/E9 0.785309); **discarded by the
+controls veto** (the new keep rule):
+- fast +0.0235 (0.6870 -> 0.7105), up on 9 of 10 crops, leave-one-out range [+0.014, +0.026] (not one
+  crop: pathologic average +0.107, s004 frame +0.034, s007 average +0.032, s000 frame +0.028); graph
+  +0.019, width +0.034, explained +0.059, explained_junction +0.085; pos -0.009.
+- probes -0.0074 (NOT held: predicted unchanged). Two kinds of loss: explained -0.01 to -0.02 on most
+  line, crossing and parallel probes (the dilated ridge mask moves B's support further from the line, so
+  B is interpolated from farther away; (a) costs a little where nothing leaked), and false deep edges
+  (line_d5_f25_h0.5 0.757 -> 0.648, cross_a30 graph 1.0 -> 0.90).
+- multi-seed controls 0.6427 -> 0.6372 and empty_average false length 80.7 -> 94.5 px: two false deep
+  edges, empty seed 2 (78 px, cylinder contrast a = 0.034) and fork_wide seed 6 (119 px running along the
+  fork's own arms, 3 false crossings). The pre-registered 'empty controls unchanged' did NOT hold: the
+  gate flags an illumination lump.
+Lesion pilot (whole images, the coarse mask in the retarget WITHOUT deep edges): s004 average 0.7450
+(+0.008; full E18 placement +0.023), pathologic average 0.6544 (+0.007; full +0.003). So (a) alone is a
+clean gain in width and explained with graph and pos identical (geometry is frozen at the retarget, so the
+review's 'pos collapses without the causes' applies only to an early placement), and the deep edges help
+where they are true (s004: type balance +0.07, width +0.04) and cost junction F1 where they are not.
+Proposal statistics before any fit (scratch b6/deepstats.py): true deep vessels have a = 0.14-0.36 and run
+across the image; the empty-control edge has a = 0.034; the fork_wide edge is a wall echo of the fork's arm.
+
+### E19: gate the deep proposals like a second channel (pre-registered)
+
+Hypothesis: E18's false deep edges are (i) a coarse echo running parallel to a proposed vessel (the fork
+arm), which neuromimetic already removes between its channels by merging against the coarser channel, and
+(ii) a faint background lump (a = 0.034), far below every true deep vessel (a >= 0.14).
+Change: in coarse.deep_edges, merge the coarse traces against the proposed network as the coarsest channel
+(merge_channels, as repropose does) and drop a trace whose median cylinder contrast is below 0.1 (= flank_a,
+the existing contrast at which a one-sided line counts as a vessel). Proposal-time check (scratch): the
+empty seed-2 and fork_wide seed-6 edges are gone, s004 and pathologic keep 3-5 deep edges, s000 average loses
+its one.
+Predicted: controls back to 0.6427 with empty false length 80.7 (veto passes); probes up from E18 toward
+~0.88 (the false deep edges on line_d5_f25_h0.5 and cross_a30 gone; the (a) explained loss stays, ~-0.003);
+fast about E18's (+-0.005); composite above R0 by > 0.002. Tier 2: s004 and pathologic up, others ~0.
+
+E19 result (tier 1, e0c9604): composite 0.791564 (+0.0063 against R0); **discarded by the controls veto**.
+- held: empty_average false length back to 80.7 px (both false deep edges gone), probes 0.8814 (-0.0022
+  against R0, against E18's -0.0074), corner and crossing_angle sweep means up;
+- fast 0.7017 (+0.0147; E18 +0.0235: the gate also drops some true deep edges or fragments them);
+- controls 0.6396 against 0.6427: no false length, but line_d3 0.661 -> 0.648, cross_a45 0.901 -> 0.897,
+  fork_wide 0.884 -> 0.882 at IDENTICAL fitted lengths. This is (a): the coarse ridge of an already-found
+  line, dilated by up to 16 px, moves B's support away from the line, B is interpolated from farther away,
+  and the explained OD falls. The veto as written (any controls_score fall) applies.
+
+### E20: only NOVEL coarse ridges claim the background (pre-registered)
+
+Hypothesis: E19's remaining control loss is the coarse response of vessels the fine channels already
+found. Like a magnocellular unit that is silent where the parvocellular map already explains the input,
+a coarse ridge should take part in B only where it is new: a connected ridge lying mostly (>= 50 %) in
+stage 1's mask leaves B alone.
+Change: ridge_mask keeps only connected ridges with < 50 % of their pixels in stage 1's mask (before
+dilation). Scratch check: the line control's mask is unchanged (0.371 -> 0.371; all ridges gave 0.450);
+s004 average 0.385 -> 0.466 (all ridges 0.680), pathologic average 0.338 -> 0.506 (0.661).
+Predicted: controls back to 0.6427 (line_d3 0.661, identical lengths), probes back to about R0's 0.8836
+(the explained loss on the line probes gone), fast lower than E19 (less flank OD recovered around known
+wide vessels; +0.005 to +0.012 against R0), composite +0.003 to +0.006 against R0. Tier 2: s004 and
+pathologic up, others within +-0.002.
