@@ -23,6 +23,8 @@ frequency, high contrast sensitivity, coarse orientation):
     as a DEEP edge with free ends: no node where it passes under a sharp vessel (a crossing of different
     depths is an overlap). Its profile comes from cross-sections of the new target (fit_profiles, box ->
     cylinder). The joint fit and the MDL / wide-edge / flank tests then judge it like every other edge.
+    Provisional (pipeline Config.deep, off): on tier 2 it adds +0.0032 +- 0.0026 on top of (a), mostly on one
+    image (batch 6); (a) alone is confirmed (+0.0014 +- 0.0005, 9 of 10 images up).
 
 Only image-derived data are read (log I, valid, stage 1's masks, the proposed network).
 """

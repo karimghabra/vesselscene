@@ -71,10 +71,20 @@ Record during tier 2 with `DIAG2_RUN=<name> python -m experiments.splinefit.run_
 --pipeline experiments.splinefit.tier2diag:annotate_saving` (the output, digests and metric are unchanged),
 then `python -m experiments.splinefit.tier2diag --run <name> [--compare <other>]`.
 
-Since batch 4 the fit re-proposes ARMS from its own prediction error (`repropose.py`, after the MDL prune):
+Since batch 4 the fit can re-propose ARMS from its own prediction error (`repropose.py`, after the MDL prune):
 neuromimetic stages 3-6 on max(OD - R, 0), kept when novel (outside the render's support) and attached to an
 existing edge (to its node, or splitting it), then 40 joint iterations and a second prune; if every arm is
-rejected the network reverts to its state before the re-proposal.
+rejected the network reverts to its state before the re-proposal. Since batch 6 it is OFF by default
+(`FitConfig.repropose`; provisional): its tier-2 gain was +0.0002 +- 0.0013 and it added false arms to the
+multi-seed controls.
+
+Since batch 6 a coarse 'magnocellular' channel (`coarse.py`) cleans the target further: Hessian ridges of
+log I at sigma 4-16 px that are elongated and NOVEL (mostly outside stage 1's mask) join the retarget's
+vesselness mask, so B is re-estimated on the mask's negative without the deep, blurred vessels that stage 1's
+fine-scale mask lets into it (tier 2 +0.0014 +- 0.0005, 9 of 10 images up; s004 and pathologic target_keep
++0.02 to +0.06). The same channel can propose free DEEP edges (no node where they pass under a sharp vessel;
+`pipeline.Config.deep`, provisional, off). `paired.py` is the paired per-image test of program.md's
+tier-2 confirm rule.
 
 ## How to run
 

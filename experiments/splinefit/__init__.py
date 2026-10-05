@@ -7,12 +7,13 @@ jointly to the whole image's optical density (OD = B - log I, the background B f
 mask's negative; never a vesselness map).
 
 Modules: proposals (neuromimetic proposal -> initial network), render (the junction-aware renderer, a
-subclass of LIMBUS vesselmap's NetworkModel), fit (joint optimisation and MDL pruning), repropose (arms
-re-proposed from the residual of the pruned render), pipeline (the harness entry point annotate(image,
+subclass of LIMBUS vesselmap's NetworkModel), fit (joint optimisation and MDL pruning), coarse (the coarse
+'magnocellular' channel: novel coarse ridges out of the background; deep edges, provisional), repropose (arms
+re-proposed from the residual of the pruned render; provisional, off), pipeline (the harness entry point annotate(image,
 valid)).  The frozen evaluator (program.md, check_frozen, frozen.json):
 score (the metric), fastset (the fast tier's crops, fastset.json), probes (the psychophysics battery,
 probe_battery.json), run_experiment (one experiment on tier 1 or 2), evaluate_fit (reference rows), tests
-(the scorer's known answers).  Diagnostics: residuals (the residual at the truth's junctions), controls
+(the scorer's known answers).  Diagnostics: residuals (the residual at the truth's junctions), paired (paired per-image tests), controls
 (multi-seed negative and line controls, outside the frozen metric), determinism (fresh-process digests).  ORACLE
 diagnostics (truth-initialised, never in the pipeline): oracle (the fit started from the true network, the
 positive control; the true network through the junction-aware render, the render model's ceiling).
