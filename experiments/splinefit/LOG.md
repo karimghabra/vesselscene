@@ -799,3 +799,52 @@ plus an unmodelled wide lumen, not missing arms. The added arm covers only part 
    is needed before arms matter there.
 4. Recommend the evaluator re-baseline (the battery averaged over 3-5 imaging seeds) through the bug-fix
    protocol, so that tier 1 sees false alarms and lump artifacts at their true rate.
+
+## Batch 5
+
+Setup: last kept = last confirmed = ffc8257 (E14; tier 1 0.788423; tier 2 0.760839, digest c829ed334440a0f9);
+pushed head b9f3166 (the same pipeline). Resets go to the latest committed log/diagnostic head.
+
+### Priority 1: the review's finding on the whole-image 'explained' (tier 2 near its ceiling)
+
+New diagnostic outside the frozen metric: `tier2diag.py`. It breaks the whole-image residual down by true
+vessel-width class (thin < 2 px, mid 2-4, wide 4-8, vwide >= 8; each band pixel goes to its nearest true
+observable sample) and per junction disc, and it measures how much of the true OD the pipeline's own target
+keeps (target_keep = sum(od_target OD_img) / sum(OD_img^2), per class). It records whole-image outputs while
+tier 2 runs: the `annotate_saving` wrapper returns annotate's output unchanged, so the digests are the
+default pipeline's. It can also run the pipeline on a few dev images directly (`--compute`).
+
+First recording (E14, pathologic_s000 average, whole image):
+
+| class | px | explained | share of SSR | target_keep | target_fidelity |
+|---|---|---|---|---|---|
+| thin (< 2) | 11606 | 0.822 | 0.03 | 0.763 | 0.849 |
+| mid (2-4) | 55320 | 0.708 | 0.15 | 0.567 | 0.723 |
+| wide (4-8) | 72103 | 0.784 | 0.18 | 0.652 | 0.806 |
+| vwide (>= 8) | 140061 | 0.755 | 0.64 | 0.669 | 0.800 |
+| all | | 0.757 | | 0.656 | 0.794 |
+
+Junction discs (64): median explained 0.741, 10th percentile 0.229, 27 % of the discs below 0.5.
+The finding is confirmed in substance: the pipeline's own target keeps only about two thirds of the true OD
+in the observable band (a third lost to the background, in every width class, worst for mid vessels next
+to wide ones), and the very wide class holds 64 % of the squared residual. The fit cannot explain OD its
+target has already given to B. The background leak (target fidelity) is ranked as a direction below.
+
+### E15: type the fitted nodes from their arm pattern (pre-registered; direction 2)
+
+Hypothesis: a re-proposed arm that lands on an existing node raises its degree; a pseudo-T that gains its
+4th arm is exported as an untyped 'compound' even when its arms pair into two straight lines, and the nodes
+the arms create carry no proposal type. Neuromimetic stage 7's typing rule (_type_of) on the fitted arms of
+every node without a valid proposal type should restore the coarse type balance.
+Change: export only (pipeline.arm_type); fit, render and topology unchanged.
+Predicted: pos, width, explained IDENTICAL; graph only through junction_type_balanced_coarse (+0 to +0.01 on
+crops with an untyped degree->=4 node); probes about unchanged; composite +0.000 to +0.002.
+
+E15 result (tier 1, 17b9c24): composite 0.788423, every part identical to 6 decimals; **discarded** (equal, not
+simpler). 9 of 44 digests changed, all through the EXACT type only: new degree-3 nodes become 'pseudo-T'
+instead of 'branch' (the same coarse class; exact accuracy up on the s000 and s007 average crops). No
+untyped degree-4 node paired into a crossing. The type-balance loss of E14 is therefore not a labelling
+problem of the new nodes: in the tier-2 confusion (E14, both runs) the big errors are truth compound typed
+crossing (53) or 3-way (60), and truth 3-way typed crossing (37), all on proposal-typed junctions.
+(The first E15 run crashed at the 600 s wall clock under machine load from a concurrent diagnostic; the
+re-run took 394 s.)
