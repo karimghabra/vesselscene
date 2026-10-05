@@ -8,6 +8,9 @@ work is organised as an *autoresearch* loop (Karpathy): a frozen evaluator, one 
 experiments that are kept or reset, a results log. The charter every experiment follows is
 [program.md](program.md); the history and the findings are in [LOG.md](LOG.md).
 
+The full report of both experiments, with annotated held-out scenes (truth, proposals, the fitted network and
+vesselmap over the image, renders, residuals and junction close-ups), is [../REPORT.md](../REPORT.md).
+
 ## Results
 
 **On six held-out scenes (12 images), the fitted spline render explains the vessel OD far better than the
@@ -216,6 +219,10 @@ Caveats:
   `results/dev/<name>/table.md`. `oracle.py`: ORACLE diagnostics (fit started from the truth = positive
   control; the truth through the junction-aware render = the render model's ceiling).
 - `check_frozen.py` / `frozen.json`: verifies the frozen files and the dev set.
+
+Report, not frozen: `report_figures.py` draws the annotated scenes of ../REPORT.md (it reads the truth, and
+stores each output's digest so the figures can be checked against the held-out JSONs), and `report_html.py`
+makes the report one self-contained HTML page.
 
 Diagnostic, not frozen: `residuals.py` (records the residual OD_obs - render at the truth's junctions and
 crossings; reads the truth to know where to look) and `determinism.py` (re-runs rows of a saved
