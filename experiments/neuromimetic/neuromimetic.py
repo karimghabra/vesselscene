@@ -193,7 +193,7 @@ def photoreceptors(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT) 
     ganglion-cell rule of stage 2 with the current background pixels), and B is refitted ONLY on the pixels
     outside M (its negative) by masked normalised convolution, G*(L w) / G*w with w = valid & ~M, holes filled
     from coarser scales. The target is OD = B - L in nepers, vessels positive (Beer-Lambert: overlapping
-    vessels add their densities), 0 on invalid pixels.
+    vessels add their densities); invalid pixels take the nearest valid OD (and carry no weight later).
     Returns dict(OD, B, L, ok (valid data), bg (background pixels), mask)."""
     I = np.asarray(image, np.float32)
     ok = np.asarray(valid, bool) & np.isfinite(I) & (I > 0) & (I < cfg.saturation)
@@ -1377,18 +1377,19 @@ def _output(edges, junctions):
                 junctions=[(float(J["x"]), float(J["y"]), J["type"]) for J in js])
 
 
-def propose(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT) -> dict:
-    """Stages 1-6: the cleaned OD target and the traces of every channel, merged."""
+def propose(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, keep_maps: bool = False) -> dict:
+    """Stages 1-6: the cleaned OD target, the band RMS maps of stage 2 and the traces of every channel, merged
+    (with keep_maps, each channel's C and S maps too, for inspection)."""
     s1 = photoreceptors(image, valid, cfg)
     s1["rms"] = ganglion_cells(s1["OD"], s1["bg"], cfg)["rms"]
-    chans = []
+    chans = [] if keep_maps else None
     traces = _channel_traces(s1["OD"], s1["bg"], s1["ok"], cfg, keep=chans)
     return dict(s1=s1, chans=chans, traces=merge_channels(traces, cfg, shape=s1["OD"].shape))
 
 
 def run(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, debug: dict | None = None,
         proposal: dict | None = None) -> dict:
-    pr = proposal if proposal is not None else propose(image, valid, cfg)
+    pr = proposal if proposal is not None else propose(image, valid, cfg, keep_maps=debug is not None)
     traces = [dict(t) for t in pr["traces"]]
     if cfg.verify:
         edges, junctions, traces = refine(pr, traces, cfg, debug)
