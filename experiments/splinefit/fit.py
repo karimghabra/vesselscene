@@ -77,7 +77,8 @@ class FitConfig:
     flank_min: float = 0.5          # ... and both must be observed (in the image, valid) on this fraction
     flank_a: float = 0.1            # ... unless its contrast (mean a, OD) reaches this: a strong one-sided
                                     # line at the frame is a vessel cut by the frame, not an illumination lump
-    repropose: bool = True          # after the prune: arms from the positive residual (repropose.arms), refit
+    repropose: bool = False         # True: after the prune, arms from the positive residual (repropose.arms),
+                                    # refit. Off (provisional): tier 2 +0.0002 +- 0.0013, controls worse (batch 6)
     iters_rep: int = 40             # joint iterations with the new arms, then a second prune
     re_k: float = 1.3               # x the readout thresholds of neuromimetic stage 6 on the residual
     prune_free_only: bool = False   # True: only edges with a free end may be pruned
