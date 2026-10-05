@@ -26,8 +26,9 @@ experiments that are kept or reset, a results log. The charter every experiment 
    halo follows.
 4. **Fit** (`fit.py`). Every parameter (control points, shared node positions, r/s/a profiles, halo, kappa)
    descends the same precision-weighted residual: profiles first, then everything jointly, MDL pruning (an
-   edge must explain more NLL than its description costs; a faint wide edge must also be seen against
-   background on both flanks, batch 2, E5/E6), topology clean-up, **retarget** (B re-fitted
+   edge must explain more NLL than its description costs, with the gain of the junction-aware prediction;
+   a wide edge must also beat a smooth background, and a faint wide edge must be seen against background on
+   both flanks, batch 2, E5/E6), topology clean-up, **retarget** (B re-fitted
    outside stage 1's mask OR the fitted render's support), and a final fit of the profiles and optics with
    the geometry frozen (batch 1, E3: free centrelines slide into the OD the re-cleaned target exposes).
 5. **Export** (`pipeline.py`). One polyline per edge (junction to junction), nodes typed, crossings found
@@ -56,7 +57,10 @@ experiments that are kept or reset, a results log. The charter every experiment 
 - `check_frozen.py` / `frozen.json`: verifies the frozen files and the dev set.
 
 Diagnostic, not frozen: `residuals.py` (records the residual OD_obs - render at the truth's junctions and
-crossings; reads the truth to know where to look).
+crossings; reads the truth to know where to look) and `determinism.py` (re-runs rows of a saved
+run_experiment JSON, each in a fresh process, and compares digests: tier 2's 'deterministic' flag only
+compares two runs inside one process). vesselmap's torch.compile is off (`set_threads` sets
+VESSELMAP_COMPILE=0): its per-shape cache made an image's floats depend on the images run before it.
 
 ## How to run
 
@@ -68,6 +72,7 @@ grep "^composite:\|^fast_composite:\|^probe_score:\|^graph:\|^pos:\|^width:\|^ex
 python -m experiments.splinefit.run_experiment --tier 2 --repeat 2 > run2.log 2>&1
 python -m experiments.splinefit.probes run --pipeline experiments.splinefit.pipeline:annotate   # tuning curves
 python -m experiments.splinefit.residuals --fast 0 2 8 --probe fork_wide cross_a20 empty_average
+python -m experiments.splinefit.determinism --json $SPLINEFIT_WORK/runs/last_tier1.json --rows 0 8
 python -m experiments.splinefit.evaluate_fit --tier 2 --rows proposals --pipeline experiments.splinefit.pipeline:annotate --out experiments/splinefit/results/dev/<name>
 python -m pytest -q experiments/splinefit/tests
 ```

@@ -433,3 +433,145 @@ on tier 1. Change: the prune uses the plain junction-aware gain (no site_mask ex
 and only the MDL inequality, the smooth-background test for wide edges and the flank test.
 Prediction: the tier-1 digest is IDENTICAL (d56fee848ca3e349): every part is equal, composite 0.785309, and it
 is kept on simplicity (about 30 fewer lines). Tier 2 may differ on whole images, where a node core could decide.
+
+E9 result (tier 1, b527f79): composite 0.785309, digest `d56fee848ca3e349`: **identical, as predicted. Kept**
+(29 fewer lines). The in-silico lesion on recorded features predicted the real lesion exactly.
+
+### E10: stage-7 proposals plus a sharp-edge test for faint wide edges (pre-registered)
+
+Recording (ORACLE diagnostic, stage-7 proposals through the E9 prune): stage-7 adds +514 px of true kept
+length on the fast averages and +282 on frames, against +34 and +171 px of false length. The two probe losses
+of E7 come from wide, faint, soft lumps (line_d3: r 9.7, s 7.2, a 0.03; line_d5_f25_h0.5: r 8.7, s 8.0, a 0.04)
+whose flanks are observed (0.64), so E6's flank test passes them. Edge features separate the frames' false
+edges poorly. Median CNR is 1.9 for false edges against 2.7 for true ones, and the gain per px and gain/penalty
+also overlap. A CNR or gain criterion at any setting costs more true length than it removes false length.
+Shape separates better. Among wide (r + s >= 8) faint (a < 0.1) edges, the soft ones (s >= 0.6 r) are the
+probe lumps (254 -> 73 px of false probe length). On the fast crops the shape test is a wash: it removes 5 true
+edges (353 px) and 3 false ones (209 px). The threshold was read off this recording, so the test is
+exploratory. Hypothesis: a vessel's lumen has a sharp edge relative to its width (a blurred box: s < r for a
+wide vessel). A broad faint profile with s ~ r is an illumination or texture modulation (it has no high
+spatial frequency), as V1's even-symmetric cells need a stripe, not a ramp.
+Change: proposals = stage-7 graph (E7's change, nm_verify False). The prune's faint wide edge (r + s >= 8,
+a < 0.1) is also removed when mean s >= 0.6 mean r (soft_k).
+Predicted: fast_composite ~0.694 (E7 0.6959 less a little true length on averages), graph +0.01 against E9;
+probe_score ~0.881 (line_d3 recovers its E6 0.743, line_d5_f25_h0.5 up, fork_thin_frame stays E7's 0.73);
+pos, width, explained about equal; composite ~0.787-0.788 (+0.002 to +0.003). If the gain is mostly probes,
+treat it as tuned to the battery and require tier 2 to hold.
+
+E10 result (tier 1, b9eb2c0): composite 0.787348 (+0.00204 against E9), **a provisional keep**: it meets the
+threshold, but the gain is half probe-tuned, so tier 2 decides it against a tier-2 re-baseline of E9 (both
+are run). Held in part:
+- graph +0.005 (predicted +0.01).
+- fast 0.6892 (predicted ~0.694). Against E7, the soft test costs the crops 0.007: it removes true faint
+  vessels. On s007 average, explained_junction falls 0.52 -> 0.39; pathologic average falls 0.481 -> 0.456.
+- probes 0.8855 (predicted 0.881). line_d3 0.743 -> 0.798 and line_d5_f25_h0.5 0.757 -> 0.896: the soft lumps
+  are gone. E7's two losses remain: fork_thin_frame is typed compound (fork threshold 4/5 -> 3/5), and
+  cross_a20 drops 0.76 -> 0.75.
+- explained_junction 0.770 -> 0.751 (NOT predicted): the removed true faint vessels sat at junctions.
+On the recorded features, a free end does not separate the removed true edges from the lumps either, so
+the rule is not tuned further.
+
+Pilot, not run on tier 1 (direction 3, typing from the fitted arm pattern): each fitted event (degree >= 3
+node, crossing) was typed by the truth's own rule. The rule counts the lines leaving the event's region (events
+whose reaches overlap form one region) by at least the truth's 6 px stub length, then types it: 3 lines a
+3-way, 4 lines a crossing when they pair into two through lines, 5 or more a compound. Results on the s000
+and s004 frame crops:
+- With reach r + s, wide veins merge distinct junctions (a true crossing 25 px from a compound on the vein
+  became compound), and balanced type accuracy falls 0.34 -> 0.27 and 0.51 -> 0.40.
+- With reach r the scores are identical to the baseline: every fitted event is already typed as its arm
+  count says.
+- The type errors (truth compound -> fit crossing 19, compound -> pseudo-T 16, crossing -> pseudo-T 9 of
+  ~110 matched) are MISSING ARMS. A crossing whose 4th arm is not traced is a T; a compound whose third vessel
+  is not traced is a crossing. Typing is a recall problem, and the next junction lever is re-proposing arms
+  from the residual around fitted junctions, not relabelling.
+
+### E11: the retarget renders the pruned network (pre-registered; the review's direction-2 fix)
+
+Hypothesis: retarget excludes from B the support of the PRE-prune model, so a removed false edge (an
+illumination lump) keeps its pixels out of B. The lump's OD stays in the final target, where the network
+cannot explain it and its neighbours' profiles absorb it (the final fit moves only profiles). E10 removes
+more such edges, so the fix matters more now. Change: the retarget's R is the render of the pruned network
+(one extra model build).
+Predicted: graph and pos identical (topology and geometry are fixed before the retarget); explained up slightly
+on the probes whose lumps were removed (line_d3, line_d5, empty); width about equal; fast within +-0.001.
+Composite +0.000 to +0.002. It is a correctness fix, so it is kept if not worse (within 0.002) because the
+code is no more complex.
+
+E11 result (tier 1, ba75eba): composite 0.788777 (+0.0014 against E10), **kept** at tier 1 as a correctness
+fix. graph and pos are identical (held). probes +0.0032 (better than predicted): line_d2.5 explained -0.07 ->
+0.47, line_d3 0.43 -> 0.65, because the removed lumps return to B. explained -0.002 overall (NOT held): where
+the prune removed a TRUE edge (s004 frame, s007 average), its pixels now go back into B and the vessel leaks
+into the background. The fix is right exactly when the prune is right.
+
+### Batch 3 summary
+
+| # | commit | change | tier-1 composite | fast | graph | pos | width | explained | expl_junction | probe_score | status | prediction held? |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E6 | 7b44ac6 | (batch 2, confirmed) | 0.785308 | 0.6870 | 0.610 | 0.752 | 0.768 | 0.772 | 0.770 | 0.884 | - | - |
+| R0 | be34189 | eager vesselmap render (determinism fix) | 0.785309 | 0.6870 | 0.610 | 0.752 | 0.768 | 0.772 | 0.770 | 0.884 | rebaseline | yes: scores equal, digest new, fresh = in-run |
+| E9 | b527f79 | prune: delete node-core dual gain, min_gain_per_px | 0.785309 | 0.6870 | 0.610 | 0.752 | 0.768 | 0.772 | 0.770 | 0.884 | **keep** (simpler) | yes, exactly: identical digest |
+| E10 | b9eb2c0 | stage-7 proposals + soft faint wide edges removed | 0.787348 | 0.6892 | 0.615 | 0.754 | 0.770 | 0.765 | 0.751 | 0.886 | keep (provisional) -> reset by tier 2 | partly: half the gain is two probe lumps; explained_junction -0.019 |
+| E11 | ba75eba | retarget renders the pruned network (on E10) | 0.788777 | 0.6889 | 0.615 | 0.754 | 0.770 | 0.763 | 0.747 | 0.889 | keep -> reset by tier 2 | mostly: probes up, explained down where removals were wrong |
+| pilot | - | junction typing from the fitted arm pattern | (2 crops) | | | | | | | | not run | a no-op at lumen reach, harmful at r + s |
+
+**Tier 2.**
+- **E9 (b527f79, with the eager render): composite 0.760603 against the confirmed 0.760600, confirm.**
+  graph 0.683044, pos 0.803793, width 0.798493, explained 0.912199, explained_junction 0.914852. It ran 2269 s
+  (in parallel with the second tier-2 run), digest `cf65125bf2fb0dea`, deterministic: True. In fresh
+  processes the pathologic_s000 average and frame reproduce their in-run digests. This is the tier-2
+  re-baseline of the determinism fix, and E9 is a no-op on whole images too (+3e-6).
+- **E10 + E11 (ba75eba): composite 0.749321, a regression of -0.0113, so reset to b527f79.** graph 0.683 ->
+  0.663, with junction_f1_strict -0.027, junction type balance -0.042, centreline recall -0.007 and edge_cover
+  -0.007. Explained -0.004, pos +0.002. 8 of 10 images lost, the worst being pathologic average (-0.033, graph
+  0.58 -> 0.51) and frame (-0.024). Deterministic, digest `8eea31a4aaa98080`.
+
+**Tuning curves (E10/E11 against E9; tier 1 only, both reset).** empty 2/2 throughout. fork threshold 4/5 ->
+3/5 (fork_thin_frame: the stage-7 graph types its fork 'compound'). The width sweep mean rose (line_d2.5
+0.64 -> 0.73, line_d3 0.74 -> 0.85, from the soft-lump removal and the pruned retarget); the contrast sweep
+rose through line_d5_f25_h0.5 (0.76 -> 0.89). cross_a20 -0.011. No other threshold moved. Kept state (E9):
+every curve is identical to E6, since the digest is identical.
+
+**Residual recording (E11 state, fast 0, 2, 8 and fork_wide, cross_a20, empty_average).** Junction biases are
+unchanged from E6 (fast0 -0.19..-0.43, fast2 -0.25..-0.50, fast8 -0.49..-0.88), and the discs still hold
+0.39-0.57 of the squared residual. On fast2 the error is a positive (under-predicted) band along the wide
+vein's lower flank, made of thin parallel stripes: thin vessels running beside and under the vein, never
+traced. The largest junction error (#4, pseudo-T, bias -0.65) is one of them. With the pilot, this points to
+the same mechanism: missing arms, not mis-typed or mis-rendered ones.
+
+**What the batch taught.**
+1. Determinism: the review's history dependence was torch.compile's per-shape cache in vesselmap's render
+   core. Eager mode removes it at no cost in time (303 s against 278-343 s) or score (1e-6). Fresh-process
+   digests now equal in-run digests on all 10 fast crops and on the two tier-2 images that diverged before.
+   determinism.py is the check.
+2. Measure before cutting. The signal-detection recording of the prune predicted the E9 lesion exactly
+   (identical digest). The same recording shows the joint prune is nearly irrelevant on stage-8 proposals
+   (1.9 % of true length, 17 % of false length). Recall is lost in the proposal, and no CNR or gain criterion
+   separates the frames' false edges (median CNR 1.9 against 2.7 for true ones).
+3. The texture's correlation area is 33-125 px^2, not 6, and averages are MORE correlated than frames. So
+   corr_px is not the reason the averages lose faint vessels and the frames keep texture edges, and a
+   per-image corr_px would push the wrong way.
+4. The fast crops and the probes over-rate the stage-7 proposal. Tier 1 favoured E7/E10 (+0.002 to +0.009 on
+   fast). On whole images stage 7 loses junction F1 and type balance (-0.027, -0.042) without gaining
+   recall. Stage 8 is doing junction work (merging and typing at the proposal level) that the joint fit does
+   not redo. The fast crops' border truncation flatters added edges: most crop edges have a 'free' border end.
+   Whole images are the honest test of proposal changes, and future proposal experiments should use tier 2
+   (or a whole-image subset) before a keep.
+5. The soft-lump test (s >= 0.6 r) was read off a recording, and on independent data (tier 2) it removes true
+   faint vessels: an exploratory threshold that failed confirmation.
+6. Junction typing is a recall problem. The fitted events' types already follow their arm counts. Truth
+   compounds become crossings and crossings become Ts because an arm is missing.
+
+**Directions for the next batch (ranked).**
+1. Re-propose arms from the residual around fitted junctions and along wide vessels (attention where error
+   remains; predicted to move junction recall, type balance and explained_junction together). The residual
+   recordings show untraced thin vessels beside and under wide veins and missing 4th arms at crossings.
+   Concretely: after the joint fit, run neuromimetic stages 3-7 on the positive residual (OD - R) restricted
+   to discs around fitted nodes and crossings and to bands along wide edges, then add the traced pieces that
+   connect to an existing junction or edge before the final fit. Judge it on tier 2 as well as tier 1.
+2. The retarget fix (E11) alone on E9: it was positive where removals were right, and E9's removals are
+   conservative (stage-8 proposals). Expect a small probe gain and a whole-image no-op.
+3. A whole-image tier-1 proxy for proposal changes: add one full dev image to the loop's checks (not to the
+   frozen metric) whenever the proposal changes, since crops over-reward added edges.
+4. The CFAR detector (the review's direction 1) is still the principled replacement for the MDL prune. The
+   recording says it can only pay off together with a proposal that adds recall without losing stage 8's
+   junction work, so it is ranked below direction 1.
