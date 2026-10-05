@@ -1,6 +1,31 @@
-"""A neuromimetic, deterministic vessel annotator (see DESIGN.md).
+"""A neuromimetic, deterministic vessel annotator for vesselscene stills (DESIGN.md, NOTES_neuromimetic.md).
 
-Work in progress: stages 1-3.
+The image is read the way the early visual system is thought to read contours, in eight stages, each a function
+below whose docstring gives its biological counterpart and its maths:
+
+1. photoreceptors / horizontal cells (`photoreceptors`): log response and a background fitted only outside the
+   vesselness mask; the target is the cleaned optical density OD = B - L (vessels positive, overlaps add);
+2. OFF-centre ganglion cells with contrast gain control (`ganglion_cells`): band-pass OD over the local RMS of
+   the same band (the band-matched CNR the truth itself uses);
+3. V1 simple cells (`simple_cells`): even (line) and odd (edge) oriented filters, 16 orientations, 9 scales in
+   three spatial-frequency channels, each a CNR: an orientation score U(x, y, theta) per channel;
+4. the non-classical surround (`surround`): cross-orientation subtraction of the isotropic (blob) part and
+   iso-orientation flank suppression from the weaker flank, keeping several orientation peaks per pixel;
+5. horizontal connections / association field (`association_field`): a fixed number of bipole diffusion
+   steps in (x, y, theta) that close gaps without extending line ends;
+6. readout (`readout`): non-maximum suppression across space and orientation and a tracker that follows each
+   line in its own orientation layers (SE(2) hysteresis), so a line runs straight through a crossing;
+7. end-stopped cells (`end_stopping`): line ends on lines (T), lines through lines (X), clustered into
+   junctions typed by their arms; every polyline runs junction to junction;
+8. iterative refinement (`refine`): the graph rendered additively in OD, the residual against the cleaned OD
+   (never against a vesselness map), MDL pruning and re-proposal from the positive residual, a fixed number of
+   rounds.
+
+Everything is deterministic: fixed filter banks and iteration counts, no random numbers, stable sorts with
+coordinate tie-breaks, per-pixel operations (FFT and OpenCV filters) whose result does not depend on the
+number of threads. One frozen `Config` holds every parameter; `ABLATIONS` switch stages off, and the
+`annotate*` functions at the end are the entry points of the evaluation harness. The annotator reads only its
+image and valid arguments.
 """
 from __future__ import annotations
 
@@ -75,6 +100,7 @@ class Config:
     rounds: int = 2
     repropose: bool = True
     re_k: float = 1.0                   # thresholds of the re-proposal readout, x t_high / t_low
+    re_mdl: float = 1.0                 # description cost multiplier of a re-proposed trace's edges
     re_novel: float = 2.0               # a re-proposed trace needs re_novel x min_len px outside rendered lumens
     jmask_k: float = 0.7                # junction discs (x radius) carry no weight in the MDL gains
     corr_px: float = 6.0                # px^2, correlation area of the OD noise (texture) for the gains
@@ -250,11 +276,15 @@ def simple_cells(OD: np.ndarray, bg: np.ndarray, cfg: Config = DEFAULT) -> list:
     texture level both cancel, the response is a CNR. Line evidence per scale z = z_even - odd_alpha |z_odd|
     (phase gating: at the wall of a wide, flat-floored vein the small-scale even response is an edge echo with
     a large odd partner and is rejected; at a centre the odd response vanishes by symmetry).
-    The scales are grouped into channels (cfg.channels: fine, medium, coarse); per channel U = max over its
-    scales and S = the argmax scale. Keeping the channels apart matters: a thin vessel crossing a wide vein
-    lives in the fine channel, where the vein's flat floor gives no response, whereas a single max over all
-    scales lets the vein's broad orientation tuning swamp it.
-    Returns [dict(U (n_orient, H, W), S (scale index into cfg.scales), sigma (the channel's typical scale))]."""
+    The scales are grouped into channels (cfg.channels: fine 1.5-3 px, medium 4.2-6, coarse 8.5-24); per
+    channel U = max over its scales and S = the argmax scale. Keeping the channels apart matters: a thin vessel
+    crossing a wide vein lives in the fine channel, where the vein's flat floor gives no response, whereas a
+    single max over all scales lets the vein's broad orientation tuning swamp it. The coarse channels are
+    computed on grids downsampled cfg.chan_factor times (area average; their scales stay >= 2.1 grid px), and
+    the coarse filters are less elongated (cfg.elong 3 / 2.5 / 2: long coarse filters draw star-shaped rays
+    from the dark knots of wide vessels).
+    Returns [dict(U (n_orient, h, w), S (scale index into cfg.scales), f (grid factor), shape (full grid),
+    sigma (the channel's typical scale, full-grid px))]."""
     H0, W0 = OD.shape
     th = orientations(cfg)
     out = []
@@ -1208,7 +1238,8 @@ def _mdl_prune(OD, sigma2, edges, cfg, rms=None):
     rd = _Render(OD, sigma2, edges, cfg)
     n = len(edges)
     H, W = OD.shape
-    cost = np.array([cfg.mdl_k * (1.0 + _plen(e["xy"]) / cfg.mdl_len) for e in edges])
+    cost = np.array([cfg.mdl_k * (1.0 + _plen(e["xy"]) / cfg.mdl_len) * (cfg.re_mdl if e.get("new") else 1.0)
+                     for e in edges])
     cnr = np.full(n, np.inf)
     if rms is not None and cfg.cnr_min > 0:
         bands = sorted(rms)
@@ -1321,6 +1352,7 @@ def _assemble_profiled(traces, cfg, OD):
         t = traces[e["trace"]]
         a, b = e["rng"]
         e["pa"], e["pr"], e["ps"] = t["pa"][a:b + 1], t["pr"][a:b + 1], t["ps"][a:b + 1]
+        e["new"] = bool(t.get("new", False))
     return edges, junctions, traces
 
 
@@ -1361,7 +1393,7 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
             for t in merged:                          # novel: mostly outside the lumens already rendered
                 ix = np.clip(np.round(t["xy"]).astype(int), 0, [OD.shape[1] - 1, OD.shape[0] - 1])
                 if float((~core[ix[:, 1], ix[:, 0]]).sum()) >= cfg.re_novel * cfg.min_len:
-                    traces.append(t)
+                    traces.append(dict(t, new=True))
     edges, junctions, traces = _assemble_profiled(traces, cfg, OD)
     rd = _Render(OD, sig2, edges, cfg)
     _knots(junctions, edges, rd, cfg)
