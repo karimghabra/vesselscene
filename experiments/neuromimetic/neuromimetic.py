@@ -43,6 +43,7 @@ from scipy import ndimage as ndi
 cv2.setNumThreads(2)
 FFT_WORKERS = 2
 _FIT_ONLY = False
+_RAY = True
 LAMBDA_PX = 11.9                        # vesselscene's lambda (truth.LAMBDA_PX): the length scale of a junction
 
 
@@ -866,7 +867,7 @@ def _events(traces: list, cfg: Config) -> list:
             # where the end's own line meets the other centreline (within the attachment reach), else the
             # nearest point: the two halves of an oblique crossing broken at a wide vessel then meet at one
             # point instead of their feet w / tan(angle) apart
-            hit = _ray_hit(p, d, traces[j]["xy"], m, cfg.gap_att + wall[q] / 2)
+            hit = _ray_hit(p, d, traces[j]["xy"], m, cfg.gap_att + wall[q] / 2) if _RAY else None
             foot = pts[q].copy() if hit is None else hit
             pos = 0.5 * (p + pts[q]) if end_end else foot
             # a short gap outside the other lumen is closed by extending the end to the other centreline;
