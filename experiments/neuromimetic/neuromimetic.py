@@ -18,8 +18,8 @@ below whose docstring gives its biological counterpart and its maths:
 7. end-stopped cells (`end_stopping`): line ends on lines (T), lines through lines (X), clustered into
    junctions typed by their arms; every polyline runs junction to junction;
 8. iterative refinement (`refine`): the graph rendered additively in OD, the residual against the cleaned OD
-   (never against a vesselness map), MDL pruning and re-proposal from the positive residual, a fixed number of
-   rounds.
+   (never against a vesselness map), MDL pruning, and optionally re-proposal from the positive residual
+   (`annotate_repropose`), a fixed number of rounds.
 
 Everything is deterministic: fixed filter banks and iteration counts, no random numbers, stable sorts with
 coordinate tie-breaks, per-pixel operations (FFT and OpenCV filters) whose result does not depend on the
@@ -1329,18 +1329,22 @@ def _assemble_profiled(traces, cfg, OD):
 
 def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = None):
     """Stage 8, iterative refinement (the lesson of diffusion models, deterministic like DDIM): a fixed
-    number of rounds of render, compare, prune and re-propose.
+    number of rounds of render, compare, prune (and, optionally, re-propose).
 
-    Each round: the graph (stage 7) is built from the traces; its edges get their width, blur and contrast
-    from cross-sections of the cleaned OD target (fit_profile); the graph is rendered additively in OD
-    (Beer-Lambert: crossing vessels add their densities); the residual is taken against OD = B - L of
+    Each round: the graph (stage 7) is built from the traces; every trace gets its contrast, width and blur
+    along it from cross-sections of the cleaned OD target (fit_profiles); the graph is rendered additively in
+    OD (Beer-Lambert: crossing vessels add their densities); the residual is taken against OD = B - L of
     stage 1 -- the image cleaned by the background fitted on the vesselness mask's negative, never a
-    vesselness map, whose response is distorted exactly at forks and crossings; edges whose removal barely
-    changes the noise-weighted squared residual are cut out of their traces (MDL, _mdl_prune); the residual
-    itself is passed again through stages 3-6 to propose what the graph does not yet explain (a vessel
-    masked by a stronger neighbour, an arm lost at a junction), and the new traces join the old ones. After
-    the last round the graph is assembled once more, pruned and re-assembled; the knot cue (OD at junction
-    centres against the additive render) is stored on each junction."""
+    vesselness map, whose response is distorted exactly at forks and crossings; edges with a free end whose
+    explained residual does not pay for their description, or whose OD profile is not visible against the
+    band RMS, are cut out of their traces (_mdl_prune, junction discs weightless). With cfg.repropose the
+    positive residual outside the junctions is passed again through stages 3-6 to propose what the graph
+    does not yet explain (a vessel masked by a stronger neighbour, an arm lost at a junction); new traces
+    that are novel (outside the rendered lumens) join the others and pay re_mdl x the description cost in
+    the next prune. On dev the re-proposal lowered every score, so it is off by default (NOTES). After the
+    last round the graph is assembled once more and the knot cue (residual at each junction centre over the
+    thinner arm's contrast: ~0 for an additive crossing, ~-1 for a fork's union) is stored on each junction;
+    it is not used for typing, the additive render being too inexact at junctions on dev."""
     s1 = pr["s1"]
     OD, bg = s1["OD"], s1["bg"]
     hp = OD - _gblur(OD, 8.0)
