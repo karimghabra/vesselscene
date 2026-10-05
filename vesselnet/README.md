@@ -1,12 +1,13 @@
-# vesselnet
+# vesselnet lives in LIMBUS
 
-Learning the vessel graph of real averaged frames from synthetic vesselscene scenes. The learned part proposes
-the graph, and `vesselmap`'s render-and-residual optimisation finishes it.
+vesselnet learns the vessel graph of real averaged slit-lamp frames from vesselscene scenes, then finishes it by
+`vesselmap`'s render-and-residual optimisation. Its code, plan and results log live in one place:
 
-- [PLAN.md](PLAN.md): the plan, written for a GPU session. Start at §0.
-- [RESULTS.md](RESULTS.md): the results log, one entry per iteration.
-- [pilot/](pilot/): the CPU proof of concept.
+**[LIMBUS, branch `claude/vesselnet-plan`, folder `vesselnet/`](https://github.com/karimghabra/limbus/tree/claude/vesselnet-plan/vesselnet)**
+([PLAN.md](https://github.com/karimghabra/limbus/blob/claude/vesselnet-plan/vesselnet/PLAN.md),
+[RESULTS.md](https://github.com/karimghabra/limbus/blob/claude/vesselnet-plan/vesselnet/RESULTS.md)).
 
-This folder is mirrored in [LIMBUS](https://github.com/karimghabra/limbus) on its branch `claude/vesselnet-plan`.
-The work needs both repositories (PLAN.md §0). Choose one home for the code and results at the start of
-iteration 0, and keep only a pointer in the other.
+LIMBUS holds `vesselmap`, which the optimisation uses, the stabilization that makes the real averaged frames, and
+the reference bursts. This repository provides the synthetic scenes and their truth. Check both out side by side
+(PLAN.md §0). Until iteration 0 this folder held a mirror of the plan and the CPU pilot, which is in the git
+history of this branch.
