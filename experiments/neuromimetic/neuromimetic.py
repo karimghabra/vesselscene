@@ -89,8 +89,6 @@ class Config:
     r0: float = 4.0                     # px added to the half widths for an event's reach
     link_k: float = 1.0                 # events link within r0 + link_k x the mean of their thinner widths
     share_k: float = 1.0                # events on a common trace link within r0 + share_k x the crossing widths
-    merge_k: float = 0.0                # junction discs closer than merge_k (R_a + R_b) are one region
-    pass_k: float = 0.0                 # traces passing within pass_k R of a junction add their arms
     arm_min: float = 6.0                # px, shortest arm counted
     cross_turn_deg: float = 40.0        # a crossing's through pairs turn at most this much
     compound_r: float = 16.0            # px: a junction region at least this large is typed compound (dev prior)
@@ -962,19 +960,22 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
     that ends on another one signals a junction (T or Y), while two lines that both continue through a point
     are seen as crossing (X).
     Maths: collinear end-to-end gaps are first bridged (mutual best pairs, turn < join_turn_deg). Events: an
-    end lying within gap_att + w/2 of another trace, ahead of the end (T), and the intersections of two
-    traces (X). Events form one junction by complete linkage when closer than r0 + link_k (w_thin,a +
-    w_thin,b) / 2 (the thinner vessels' widths: the size of their lumen overlap); its centre is their mean,
+    end lying within gap_att + w/2 of another trace, in a cone of att_cone_deg ahead of the end or inside its
+    lumen (T), and the intersections of two traces (X). Events form one junction by complete linkage
+    (_cluster_events: closer than r0 + link_k (w_thin,a + w_thin,b) / 2, the size of their lumen overlaps,
+    or r0 + share_k x the crossing widths for two events on one trace); its centre is their mean,
     its radius the farthest reach (r0 + half the wider vessel). Its arms are the participating traces'
     stretches leaving the disc, at least arm_min long: 3 arms is a 3-way junction ('pseudo-T' by default),
     4 arms that pair into two straight lines (turn < cross_turn_deg; a trace passing through pairs its own
     two arms) at clearly different orientations a 'crossing', otherwise (4 unpaired, 5 or more) a
     'compound'; with fewer than 3 arms there is no junction. A junction whose region is at least compound_r
-    in radius is typed 'compound' whatever its traced arms (on dev, 81 % of such regions are compounds in the
-    truth: wide vessels gather lines that are too faint to trace). A trace ending on another is extended to its
-    attachment point, then every trace is cut at its point nearest each of its junctions (where the truth's
-    edges end too), so each polyline runs junction to junction. Returns (edges: [dict(xy, c, w, j=(j0,
-    j1))], junctions: [dict(x, y, r, type, arms, tids)], traces)."""
+    in radius is typed 'compound' whatever its traced arms (a dev prior: such regions are mostly compounds in
+    the truth, wide vessels gathering lines too faint to trace; it raised the balanced coarse accuracy too).
+    Before the events, vessel widths are measured on OD cross-sections (od_widths). A trace ending outside
+    another's lumen within ext_max of its centreline is extended to that attachment point; then every trace
+    is cut at its point nearest each of its junctions (where the truth's edges end too), so each polyline
+    runs junction to junction. Returns (edges: [dict(xy, c, w, j=(j0, j1), trace, rng)], junctions:
+    [dict(x, y, r, type, geom, arms, tids)], traces)."""
     traces = [t for t in traces if _plen(t["xy"]) >= cfg.min_len]
     traces = _join_gaps(traces, cfg)
     traces.sort(key=lambda t: (-len(t["xy"]), float(t["xy"][0, 0]), float(t["xy"][0, 1])))
@@ -987,52 +988,19 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
                 t["w_od"], t["a_od"] = od_widths(OD, t["xy"], t["w"])
             t["w"] = np.clip(t["w_od"], 1.5, None)
     ev = _events(traces, cfg)
-    groups = _cluster_events(ev, cfg)
-    cand = []
-    for g in groups:
+    junctions = []
+    for g in _cluster_events(ev, cfg):
         E = [ev[k] for k in g]
         c = np.mean([e["p"] for e in E], 0)
         R = max(math.hypot(*(e["p"] - c)) + cfg.r0 + 0.5 * e["wide"] for e in E)
-        cand.append([c, R, set(g)])
-    if cfg.merge_k > 0:                               # junctions whose discs overlap are one region
-        changed = True
-        while changed:
-            changed = False
-            for a in range(len(cand)):
-                for b in range(a + 1, len(cand)):
-                    ca, Ra, ga = cand[a]
-                    cb, Rb, gb = cand[b]
-                    if math.hypot(*(ca - cb)) <= cfg.merge_k * (Ra + Rb):
-                        g = ga | gb
-                        E = [ev[k] for k in sorted(g)]
-                        c = np.mean([e["p"] for e in E], 0)
-                        R = max(math.hypot(*(e["p"] - c)) + cfg.r0 + 0.5 * e["wide"] for e in E)
-                        cand[a] = [c, R, g]
-                        del cand[b]
-                        changed = True
-                        break
-                if changed:
-                    break
-    if cfg.pass_k > 0:
-        from scipy.spatial import cKDTree
-        allp = np.concatenate([t["xy"] for t in traces])
-        own = np.concatenate([np.full(len(t["xy"]), i) for i, t in enumerate(traces)])
-        tree = cKDTree(allp)
-    junctions = []
-    for c, R, g in cand:
-        E = [ev[k] for k in sorted(g)]
-        tids = {i for e in E for i in e["tr"]}
-        if cfg.pass_k > 0:                            # every trace through the region adds its arms
-            tids |= {int(own[q]) for q in tree.query_ball_point(c, cfg.pass_k * R)}
-        tids = sorted(tids)
+        tids = sorted({i for e in E for i in e["tr"]})
         arms = _arms(traces, tids, c, R, cfg)
         if len(arms) < 3:
             continue
-        typ = _type_of(arms, cfg)
-        if R >= cfg.compound_r:                       # a region this large gathers more lines than are traced
-            typ = "compound"
-        junctions.append(dict(x=float(c[0]), y=float(c[1]), r=float(R), type=typ, arms=arms, geom=_type_of(arms, cfg),
-                              tids=tids, strength=float(np.mean([traces[i]["c"].mean() for i in tids]))))
+        geom = _type_of(arms, cfg)
+        typ = "compound" if R >= cfg.compound_r else geom   # a region this large gathers more lines than traced
+        junctions.append(dict(x=float(c[0]), y=float(c[1]), r=float(R), type=typ, geom=geom, arms=arms, tids=tids,
+                              strength=float(np.mean([traces[i]["c"].mean() for i in tids]))))
     ext = {}
     for e in ev:
         if e["att"] is not None:
