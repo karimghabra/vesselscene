@@ -60,6 +60,7 @@ class Config:
     # 7. graph assembly
     gap_att: float = 6.0                # px beyond the other vessel's half width an end may attach
     att_cone_deg: float = 45.0          # ... within this cone ahead of the end
+    ext_max: float = 12.0               # px, longest extension of an end to its attachment
     gap_join: float = 14.0              # px, collinear end-to-end gaps bridged
     join_turn_deg: float = 40.0
     r0: float = 4.0                     # px added to the half widths for an event's reach
@@ -1024,9 +1025,11 @@ def _events(traces: list, cfg: Config) -> list:
             _, j, m, q = best
             end_end = min(m, len(traces[j]["xy"]) - 1 - m) < 3
             pos = 0.5 * (p + pts[q]) if end_end else pts[q].copy()
+            # a short gap outside the other lumen is closed by extending the end to the other centreline;
+            # an end already inside a (wide) lumen stays where it is
+            att = (i, e, pts[q].copy()) if (best[0][0] > 0 and math.hypot(*(pts[q] - p)) <= cfg.ext_max) else None
             ev.append(dict(p=pos, tr=(i, j), wt={i: float(t["w"][ie]), j: float(wall[q])},
-                           wide=max(t["w"][ie], wall[q]), thin=min(t["w"][ie], wall[q]), kind="T",
-                           att=(i, e, pts[q].copy())))
+                           wide=max(t["w"][ie], wall[q]), thin=min(t["w"][ie], wall[q]), kind="T", att=att))
     lines = [LineString(t["xy"]) for t in traces]
     st = STRtree(lines)
     a_idx, b_idx = st.query(lines, predicate="intersects")
@@ -1265,60 +1268,83 @@ def _box(u: np.ndarray, r, s) -> np.ndarray:
     return (ndtr((r - u) / s) - ndtr((-r - u) / s)) / (ndtr(r / s) - ndtr(-r / s))
 
 
-def fit_profile(OD: np.ndarray, xy: np.ndarray, w: np.ndarray) -> tuple[float, float, float]:
-    """Width, blur and contrast of an edge from its cross-sections in the cleaned OD target: the median
-    profile along the normals (middle 80 % of the edge, every 2 px, +-(1.5 w + 6) px), fitted by
-    a box(u; r, s) + b over a grid of (r, s) with (a, b) by linear least squares. Returns (a, r, s)."""
-    n = len(xy)
-    T = _tangents(xy, 2)
-    lo, hi = (int(0.1 * n), int(np.ceil(0.9 * n))) if n > 12 else (0, n)
-    ii = np.arange(lo, max(hi, lo + 1), 2)
-    U = float(np.clip(1.5 * float(np.median(w)) + 6.0, 8.0, 60.0))
-    us = np.arange(-U, U + 0.01, 0.5)
-    X = xy[ii, None, 0] - us[None, :] * T[ii, None, 1]
-    Y = xy[ii, None, 1] + us[None, :] * T[ii, None, 0]
-    prof = np.median(_bilinear(OD, X.ravel(), Y.ravel()).reshape(X.shape), 0)
+def _box_fit(prof: np.ndarray, us: np.ndarray):
+    """Least-squares fit of profiles (n, m) sampled at us by a box(u; r, s) + b over the (r, s) grid, (a, b)
+    linear. Returns (a, r, s) arrays (a = 0 where nothing positive fits)."""
     M = _box(us[None, None, :], _RG[:, None, None], _SG[None, :, None]).reshape(-1, len(us))
-    m1, m2 = M.sum(1), (M * M).sum(1)
     k = float(len(us))
-    py, pp = float(prof.sum()), (M * prof[None]).sum(1)
-    det = m2 * k - m1 * m1
-    a = (pp * k - m1 * py) / np.maximum(det, 1e-9)
-    b = (py - a * m1) / k
-    ss = ((a[:, None] * M + b[:, None] - prof[None]) ** 2).sum(1)
-    ss[a <= 0] = np.inf
-    j = int(np.argmin(ss))
-    if not np.isfinite(ss[j]):
-        return 0.0, 1.0, 1.0
-    return float(a[j]), float(_RG[j // len(_SG)]), float(_SG[j % len(_SG)])
+    m1, m2 = M.sum(1), (M * M).sum(1)
+    py, p2 = prof.sum(1), (prof * prof).sum(1)
+    pp = prof @ M.T
+    det = m2[None] * k - m1[None] ** 2
+    A = (pp * k - m1[None] * py[:, None]) / np.maximum(det, 1e-9)
+    Bc = (py[:, None] - A * m1[None]) / k
+    ss = p2[:, None] - 2 * A * pp - 2 * Bc * py[:, None] + A * A * m2[None] + 2 * A * Bc * m1[None] + Bc * Bc * k
+    ss = np.where(A > 0, ss, np.inf)
+    j = np.argmin(ss, 1)
+    ok = np.isfinite(ss[np.arange(len(j)), j])
+    a = np.where(ok, A[np.arange(len(j)), j], 0.0)
+    return a, _RG[j // len(_SG)], _SG[j % len(_SG)]
 
 
-def _tube(shape, xy: np.ndarray, r: float, s: float):
-    """Flat pixel indices and unit-amplitude values of a blurred-box tube along a polyline, with butt ends
-    (pieces of one vessel cut at a junction join without a seam)."""
+def fit_profiles(OD: np.ndarray, xy: np.ndarray, w: np.ndarray, step: int = 6):
+    """Contrast, half width and blur along a trace from cross-sections of the cleaned OD target (never a
+    filter response): every `step` px, the median cross-section over +-max(6, w) px of the trace, along the
+    normals over +-(1.5 w + 6) px, fitted by a box(u; r, s) + b (_box_fit); linear interpolation between the
+    fits and a running median of 3, so one vessel is rendered without seams. Returns (a, r, s) per point."""
+    n = len(xy)
+    wm = float(np.median(w))
+    T = _tangents(xy, 2)
+    U = float(np.clip(1.5 * wm + 6.0, 8.0, 60.0))
+    us = np.arange(-U, U + 0.01, 0.5)
+    X = xy[:, None, 0] - us[None, :] * T[:, None, 1]
+    Y = xy[:, None, 1] + us[None, :] * T[:, None, 0]
+    Pf = _bilinear(OD, X.ravel(), Y.ravel()).reshape(X.shape)
+    cs = np.unique(np.r_[np.arange(0, n, step), n - 1])
+    h = int(max(6, round(wm)))
+    prof = np.stack([np.median(Pf[max(0, c - h):c + h + 1], 0) for c in cs])
+    a, r, s_ = _box_fit(prof, us)
+    if len(cs) >= 3:
+        a, r, s_ = (ndi.median_filter(v, 3, mode="nearest") for v in (a, r, s_))
+    i = np.arange(n)
+    return np.interp(i, cs, a), np.interp(i, cs, r), np.interp(i, cs, s_)
+
+
+def _tube(shape, xy: np.ndarray, a: np.ndarray, r: np.ndarray, s: np.ndarray):
+    """Flat pixel indices and OD values of a blurred-box tube along a polyline with per-point contrast a,
+    half width r and blur s (each pixel takes the parameters of its nearest centreline point), with butt
+    ends: the pieces of one vessel cut at a junction join without a seam."""
     from scipy.spatial import cKDTree
     H, W = shape
-    reach = r + 3.0 * s + 1.0
+    none = (np.zeros(0, np.int64), np.zeros(0, np.float64))
+    if len(xy) < 2:
+        return none
+    reach = float(np.max(r + 3.0 * s)) + 1.0
     x0, y0 = int(max(0, np.floor(xy[:, 0].min() - reach))), int(max(0, np.floor(xy[:, 1].min() - reach)))
     x1, y1 = int(min(W - 1, np.ceil(xy[:, 0].max() + reach))), int(min(H - 1, np.ceil(xy[:, 1].max() + reach)))
     if x1 < x0 or y1 < y0:
-        return np.zeros(0, np.int64), np.zeros(0, np.float32)
+        return none
     m = np.zeros((y1 - y0 + 1, x1 - x0 + 1), np.uint8)
     Q = np.round(xy - [x0, y0]).astype(np.int32).reshape(-1, 1, 2)
     cv2.polylines(m, [Q], False, 1, thickness=int(2 * np.ceil(reach)) + 1)
     yy, xx = np.nonzero(m)
     pix = np.stack([xx + x0, yy + y0], 1).astype(float)
-    P = _resample(xy, 0.5)
-    if len(P) < 2:
-        return np.zeros(0, np.int64), np.zeros(0, np.float32)
+    t_ = np.r_[0, np.cumsum(np.hypot(*np.diff(xy, axis=0).T))]
+    tt = np.linspace(0, t_[-1], max(2, int(round(t_[-1] / 0.5)) + 1))
+    P = np.stack([np.interp(tt, t_, xy[:, 0]), np.interp(tt, t_, xy[:, 1])], 1)
+    pa, pr, ps = (np.interp(tt, t_, v) for v in (a, r, s))
     d, k = cKDTree(P).query(pix, distance_upper_bound=reach)
     ok = np.isfinite(d)
+    k = np.minimum(k, len(P) - 1)
     t0 = (P[1] - P[0]) / max(np.hypot(*(P[1] - P[0])), 1e-9)
     t1 = (P[-1] - P[-2]) / max(np.hypot(*(P[-1] - P[-2])), 1e-9)
     ok &= ~((k == 0) & (((pix - P[0]) @ t0) < -0.5))
     ok &= ~((k == len(P) - 1) & (((pix - P[-1]) @ t1) > 0.5))
-    idx = (pix[ok, 1].astype(np.int64) * W + pix[ok, 0].astype(np.int64))
-    return idx, _box(d[ok], r, s).astype(np.float32)
+    kk = k[ok]
+    val = pa[kk] * _box(d[ok], pr[kk], ps[kk])
+    keep = val > 1e-5
+    idx = pix[ok, 1].astype(np.int64) * W + pix[ok, 0].astype(np.int64)
+    return idx[keep], val[keep]
 
 
 class _Render:
@@ -1330,31 +1356,27 @@ class _Render:
         self.t = OD.ravel().astype(np.float64)
         self.iw = 1.0 / sigma2.ravel().astype(np.float64)
         self.R = np.zeros(self.t.size)
-        self.tubes = []
-        for e in edges:
-            idx, val = _tube(self.shape, e["xy"], e["r"], e["s"])
-            self.tubes.append((idx, val.astype(np.float64)))
-            np.add.at(self.R, idx, e["a"] * val)
-        self.a = np.array([e["a"] for e in edges], float)
+        self.tubes = [_tube(self.shape, e["xy"], e["pa"], e["pr"], e["ps"]) for e in edges]
+        for idx, val in self.tubes:
+            np.add.at(self.R, idx, val)
         self.alive = np.ones(len(edges), bool)
 
-    def gain(self, k: int) -> tuple[float, float]:
-        """Noise-weighted fall of the squared residual when edge k (re-fitted alone, a >= 0) is added to the
-        others: (sum p r_-k / s^2)^2 / sum p^2 / s^2, over the correlation area corr_px. Returns (gain, a)."""
+    def gain(self, k: int) -> float:
+        """Noise-weighted fall of the squared residual that edge k brings, given the others:
+        sum((r + p)^2 - r^2) / s^2 = sum(2 r p + p^2) / s^2 over its tube, r the residual with k rendered,
+        divided by the correlation area corr_px. Negative where k duplicates what others already explain."""
         idx, p = self.tubes[k]
         if not len(idx):
-            return 0.0, 0.0
-        rk = self.t[idx] - self.R[idx] + self.a[k] * p
-        w = self.iw[idx]
-        num, den = float((p * rk * w).sum()), float((p * p * w).sum())
-        if num <= 0 or den <= 0:
-            return 0.0, 0.0
-        return num * num / den / self.cfg.corr_px, num / den
+            return 0.0
+        r = self.t[idx] - self.R[idx]
+        if not self.alive[k]:
+            r = r - p
+        return float(((2 * r * p + p * p) * self.iw[idx]).sum()) / self.cfg.corr_px
 
-    def set_amp(self, k: int, a: float):
+    def remove(self, k: int):
         idx, p = self.tubes[k]
-        np.add.at(self.R, idx, (a - self.a[k]) * p)
-        self.a[k] = a
+        np.subtract.at(self.R, idx, p)
+        self.alive[k] = False
 
     def residual(self) -> np.ndarray:
         return (self.t - self.R).reshape(self.shape).astype(np.float32)
@@ -1371,32 +1393,29 @@ def _band_resp(r: float, s: float, bands) -> np.ndarray:
 
 
 def _mdl_prune(OD, sigma2, edges, cfg, rms=None):
-    """Greedy MDL with a visibility floor: fit every edge's amplitude against the others (two Gauss-Seidel
-    sweeps: explaining away), then remove, one at a time, the edge that falls furthest short of either test,
-    re-fitting its overlapping neighbours, until every edge passes both:
-      gain >= mdl_k (1 + length / mdl_len)   (the squared residual it removes pays for its description), and
-      CNR = a max_b resp_b(r, s) / RMS_b >= cnr_min   (its rendered profile, in stage 2's band b, against the
-      local background RMS of that band along it: the band-matched visibility the truth itself uses)."""
+    """Greedy MDL with a visibility floor: remove, one at a time, the edge that falls furthest short of either
+    test, updating the render and its overlapping neighbours, until every edge passes both:
+      gain >= mdl_k (1 + length / mdl_len)  (the squared residual it removes pays for its description; a
+      duplicate of what other edges already render has a negative gain: explaining away), and
+      CNR = a max_b resp_b(r, s) / RMS_b >= cnr_min  (its OD profile in stage 2's band b against the local
+      background RMS of that band along it: the band-matched visibility the truth itself uses).
+    Returns (keep flags, the render)."""
     rd = _Render(OD, sigma2, edges, cfg)
     n = len(edges)
-    for _ in range(2):
-        for k in range(n):
-            rd.set_amp(k, rd.gain(k)[1])
-    cost = np.array([cfg.mdl_k * (1.0 + _plen(e["xy"]) / cfg.mdl_len) for e in edges])
     H, W = OD.shape
+    cost = np.array([cfg.mdl_k * (1.0 + _plen(e["xy"]) / cfg.mdl_len) for e in edges])
+    cnr = np.full(n, np.inf)
     if rms is not None and cfg.cnr_min > 0:
         bands = sorted(rms)
-        unit = np.zeros(n)
         for k, e in enumerate(edges):
             ix = np.clip(np.round(e["xy"]).astype(int), 0, [W - 1, H - 1])
             noise = np.array([float(np.median(rms[b][ix[:, 1], ix[:, 0]])) for b in bands])
-            unit[k] = float(np.max(_band_resp(e["r"], e["s"], bands) / np.maximum(noise, 1e-6)))
-    else:
-        unit = np.full(n, np.inf)
+            resp = _band_resp(float(np.median(e["pr"])), float(np.median(e["ps"])), bands)
+            cnr[k] = float(np.median(e["pa"])) * float(np.max(resp / np.maximum(noise, 1e-6)))
+            e["cnr"] = cnr[k]
 
     def value(k):
-        g, a = rd.gain(k)
-        return min(g / cost[k], a * unit[k] / cfg.cnr_min if cfg.cnr_min > 0 else np.inf)
+        return min(rd.gain(k) / cost[k], cnr[k] / cfg.cnr_min if cfg.cnr_min > 0 else np.inf)
 
     v = np.array([value(k) for k in range(n)])
     bb = np.array([(idx.min() // W, idx.max() // W, (idx % W).min(), (idx % W).max()) if len(idx) else (0, -1, 0, -1)
@@ -1406,38 +1425,33 @@ def _mdl_prune(OD, sigma2, edges, cfg, rms=None):
         if not len(cand):
             break
         k = int(cand[np.lexsort((cand, v[cand]))[0]])
-        rd.set_amp(k, 0.0)
-        rd.alive[k] = False
+        rd.remove(k)
         v[k] = np.inf
         near = rd.alive & (bb[:, 0] <= bb[k, 1]) & (bb[:, 1] >= bb[k, 0]) & (bb[:, 2] <= bb[k, 3]) & (bb[:, 3] >= bb[k, 2])
         sk = set(rd.tubes[k][0].tolist())
         for j in np.flatnonzero(near):
             if not sk.isdisjoint(rd.tubes[j][0].tolist()):
-                rd.set_amp(j, rd.gain(j)[1])
                 v[j] = value(j)
-    for k in range(n):
-        edges[k]["a"] = float(rd.a[k])
-        edges[k]["cnr"] = float(rd.a[k] * unit[k])
     return rd.alive.tolist(), rd
 
 
 def _knots(junctions, edges, rd, cfg):
     """The OD at a junction's centre against the additive render: two vessels crossing at different depths
-    add their densities (a dark knot, residual ~0 under the additive render), the lumens of a fork are a
-    union (the render over-predicts by about the thinner vessel's density: residual ~ -a_min). Stores
-    knot = mean residual in a disc of radius max(1.5, r_min / 2) / a_min."""
+    add their densities (a dark knot; the additive render explains it, residual ~0), the lumens of a fork are
+    a union (the additive render over-predicts by about the thinner vessel's density: residual ~ -a_min).
+    Stores knot = the mean residual in a disc of radius max(1.5, r_min / 2) over a_min."""
     res = rd.residual()
     H, W = res.shape
-    for J in junctions:
-        near = [e for e in edges if e["j"][0] == J["id"] or e["j"][1] == J["id"]]
+    for ji, J in enumerate(junctions):
+        near = [e for e in edges if ji in e["j"]]
         if len(near) < 2:
             J["knot"] = float("nan")
             continue
-        amin = max(min(e["a"] for e in near), 1e-4)
-        rmin = min(e["r"] for e in near)
-        rad = max(1.5, 0.5 * rmin)
+        amin = max(min(float(np.median(e["pa"])) for e in near), 1e-4)
+        rad = max(1.5, 0.5 * min(float(np.median(e["pr"])) for e in near))
         x, y = J["x"], J["y"]
-        y0, y1, x0, x1 = int(max(0, y - rad - 1)), int(min(H, y + rad + 2)), int(max(0, x - rad - 1)), int(min(W, x + rad + 2))
+        y0, y1 = int(max(0, y - rad - 1)), int(min(H, y + rad + 2))
+        x0, x1 = int(max(0, x - rad - 1)), int(min(W, x + rad + 2))
         yy, xx = np.mgrid[y0:y1, x0:x1]
         m = (xx - x) ** 2 + (yy - y) ** 2 <= rad * rad
         J["knot"] = float(res[y0:y1, x0:x1][m].mean() / amin) if m.any() else float("nan")
@@ -1472,6 +1486,18 @@ def _remove_ranges(traces: list, edges: list, keep: list, cfg: Config) -> list:
     return out
 
 
+def _assemble_profiled(traces, cfg, OD):
+    """Stage 7, then every trace's OD profile (fit_profiles) and its slice on each edge."""
+    edges, junctions, traces = end_stopping(traces, cfg, OD)
+    for t in traces:
+        t["pa"], t["pr"], t["ps"] = fit_profiles(OD, t["xy"], t["w"])
+    for e in edges:
+        t = traces[e["trace"]]
+        a, b = e["rng"]
+        e["pa"], e["pr"], e["ps"] = t["pa"][a:b + 1], t["pr"][a:b + 1], t["ps"][a:b + 1]
+    return edges, junctions, traces
+
+
 def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = None):
     """Stage 8, iterative refinement (the lesson of diffusion models, deterministic like DDIM): a fixed
     number of rounds of render, compare, prune and re-propose.
@@ -1492,9 +1518,7 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
     sig2 = np.maximum(_local_rms(hp, bg, 32.0), 1e-4) ** 2
     sig2 = np.where(s1["ok"], sig2, 1e12)              # invalid pixels carry no weight
     for rnd in range(cfg.rounds + 1):
-        edges, junctions, traces = end_stopping(traces, cfg, OD)
-        for e in edges:
-            e["a"], e["r"], e["s"] = fit_profile(OD, e["xy"], e["w"])
+        edges, junctions, traces = _assemble_profiled(traces, cfg, OD)
         keep, rd = _mdl_prune(OD, sig2, edges, cfg, s1.get("rms"))
         traces = _remove_ranges(traces, edges, keep, cfg)
         if rnd < cfg.rounds and cfg.repropose:
@@ -1505,17 +1529,8 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
             acc = [dict(t, chan=len(cfg.channels)) for t in traces]
             merged = merge_channels(new, cfg, accepted=acc, shape=OD.shape)
             traces = traces + merged[len(acc):]
-    edges, junctions, traces = end_stopping(traces, cfg, OD)
-    for k, J in enumerate(junctions):
-        J["id"] = k
-    for e in edges:
-        e["a"], e["r"], e["s"] = fit_profile(OD, e["xy"], e["w"])
+    edges, junctions, traces = _assemble_profiled(traces, cfg, OD)
     rd = _Render(OD, sig2, edges, cfg)
-    for _ in range(2):
-        for k in range(len(edges)):
-            rd.set_amp(k, rd.gain(k)[1])
-    for k, e in enumerate(edges):
-        e["a"] = float(rd.a[k])
     _knots(junctions, edges, rd, cfg)
     if debug is not None:
         debug.update(residual=rd.residual(), sig2=sig2)
