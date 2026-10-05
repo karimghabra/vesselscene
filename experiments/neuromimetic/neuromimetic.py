@@ -54,6 +54,8 @@ class Config:
     look_px: int = 3                    # the tracker looks this far ahead (bridging 1-2 px gaps)
     pass_px: int = 4                    # ... and passes through another trace's claim for at most this long
     claim_k: float = 0.5                # a sample claims +-max(1, claim_k sigma) px across (its lumen)
+    dup_bins: int = 1                   # channel merge: parallel = within this many 11.25 deg bins (duplicates)
+    wall_bins: int = 0                  # ... and for the wall echoes inside a coarser vessel
     spur_len: float = 5.0               # px, terminal skeleton branches shorter than this (+ width) are cut
     # 7. graph assembly
     gap_att: float = 6.0                # px beyond the other vessel's half width an end may attach
@@ -744,10 +746,11 @@ def _tangents(P: np.ndarray, k: int = 3) -> np.ndarray:
 
 def merge_channels(traces: list, cfg: Config = DEFAULT, accepted: list | None = None, shape=None) -> list:
     """Merge the traces of the spatial-frequency channels (and new proposals into accepted traces):
-    strongest first, a point is dropped where an accepted trace runs parallel (< 20 deg) within 3 px, or
-    parallel (< 10 deg) within 0.6 of its width when that trace is from a coarser channel (the wall echoes of
-    a wide vein; a thin vessel crossing the vein at a shallow angle is kept); the uncovered runs of at least
-    min_len are kept. Coverage is drawn into rasters per orientation bin (16 bins of 11.25 deg)."""
+    strongest first, a point is dropped where an accepted trace runs parallel (orientation within dup_bins
+    bins of 11.25 deg) within 3 px, or parallel (within wall_bins) within 0.6 of its width when that trace is
+    from a coarser channel (the wall echoes of a wide vein; a thin vessel crossing the vein at a shallow angle
+    is kept); the uncovered runs of at least min_len are kept. Coverage is drawn into rasters per orientation
+    bin."""
     acc = list(accepted or [])
     allxy = [t["xy"] for t in acc + list(traces)]
     if not allxy:
@@ -788,10 +791,10 @@ def merge_channels(traces: list, cfg: Config = DEFAULT, accepted: list | None = 
         bins = np.round(np.mod(np.arctan2(Tg[:, 1], Tg[:, 0]), np.pi) / (np.pi / nb)).astype(int) % nb
         ch = int(t.get("chan", 0)) + 1
         cov = np.zeros(len(P), bool)
-        for d in (-2, -1, 0, 1, 2):
+        for d in range(-cfg.dup_bins, cfg.dup_bins + 1):
             kb = (bins + d) % nb
             cov |= dup[kb, ix[:, 1], ix[:, 0]] > 0
-            if abs(d) <= 1:
+            if abs(d) <= cfg.wall_bins:
                 cov |= wall[kb, ix[:, 1], ix[:, 0]] > ch
         lab, nl = ndi.label(~cov)
         for r in range(1, nl + 1):
@@ -1497,7 +1500,11 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
         if rnd < cfg.rounds and cfg.repropose:
             res = rd.residual()
             new = _channel_traces(res, bg, s1["ok"], cfg, t_high=cfg.t_high * cfg.re_k, t_low=cfg.t_low * cfg.re_k)
-            traces = merge_channels(new, cfg, accepted=traces, shape=OD.shape)
+            # the graph's own vessels count as coarser than any proposal: misfit echoes along their walls
+            # (parallel, inside 0.6 of their width) are not new vessels
+            acc = [dict(t, chan=len(cfg.channels)) for t in traces]
+            merged = merge_channels(new, cfg, accepted=acc, shape=OD.shape)
+            traces = traces + merged[len(acc):]
     edges, junctions, traces = end_stopping(traces, cfg, OD)
     for k, J in enumerate(junctions):
         J["id"] = k
@@ -1544,9 +1551,30 @@ def run(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, debug: dict
     return _output(edges, junctions)
 
 
+ABLATIONS = dict(full={}, no_verify=dict(verify=False), no_association=dict(association=False),
+                 no_surround=dict(surround=False), v1_only=dict(surround=False, association=False, verify=False))
+
+
 def annotate(image, valid):
+    """The full annotator, stages 1-8."""
     return run(image, valid, DEFAULT)
 
 
-ABLATIONS = dict(full={}, no_verify=dict(verify=False), no_association=dict(association=False),
-                 no_surround=dict(surround=False), v1_only=dict(surround=False, association=False, verify=False))
+def annotate_no_verify(image, valid):
+    """Stages 1-7: no render / residual / prune / re-propose refinement."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["no_verify"]))
+
+
+def annotate_no_association(image, valid):
+    """All stages but the association field (5): no contour completion."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["no_association"]))
+
+
+def annotate_no_surround(image, valid):
+    """All stages but the non-classical surround (4)."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["no_surround"]))
+
+
+def annotate_v1_only(image, valid):
+    """Stages 1-3 + 6-7: the orientation score read out without any contextual stage."""
+    return run(image, valid, replace(DEFAULT, **ABLATIONS["v1_only"]))
