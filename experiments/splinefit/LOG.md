@@ -697,3 +697,105 @@ Predicted:
 - composite -0.005 to +0.003 on tier 1, so likely below the threshold.
 If it is discarded on tier 1, the recording says it is a whole-image gain that the single-seed battery cannot
 see. The multi-seed controls would then decide whether the probe losses are lump artifacts or real false arms.
+
+E14 result (tier 1, ffc8257): composite 0.788423 (+0.00311 against E9), **kept**. The predictions held, at the
+upper end:
+- fast +0.0126 (0.6870 -> 0.6996), on 6 of 10 crops: s000 average +0.015, s000 frame +0.013, s007 average
+  +0.030, pathologic average +0.073; s004 average -0.007, s007 frame -0.006.
+- graph +0.023, explained +0.019, explained_junction +0.026; pos -0.003, width -0.008.
+- probes -0.0064 (predicted -0.005 to -0.015). fork_asym 0.98 -> 0.89 (two texture arms, typed 'branch'),
+  capillary_average 0.94 -> 0.81 (the seed-11 lump arm), cross_a45_wide_over_thin +0.007. Empty stays 2/2.
+
+Multi-seed controls (the review's required check; E14 against E9): controls_score 0.6427 -> 0.6056. 13 of 42
+fits changed: 10 are worse and none is better. Mean probe_composite per control:
+
+| control | E9 | E14 |
+|---|---|---|
+| line_d3 | 0.661 | 0.602 |
+| line_d6_h0.25 | 0.360 | 0.315 |
+| empty_average | 0.285 | 0.241 |
+| empty_frame | 0.766 | 0.714 |
+| fork_wide | 0.884 | 0.874 |
+| cross_a45 | 0.901 | 0.888 |
+
+False 'branch' arms attach to the line on 4 of 7 seeds for each line control, and two empty draws gain false
+length. So the single-seed battery UNDER-states E14's false-alarm cost (2 of 34 probes against 10 of 42
+control fits). This is the mirror image of the E5/E6 case.
+
+**Tier 2 (E14, ffc8257): composite 0.760839 against the confirmed 0.760603 (+0.00024), not regressed, so
+confirmed.** Deterministic: True; digest c829ed334440a0f9; 2557 s (the machine was shared).
+- graph 0.684037 (+0.001), pos 0.802285 (-0.0015), width 0.791701 (-0.0068), explained 0.918937 (+0.0067),
+  explained_junction 0.921196 (+0.0063).
+- Per image the composite moves -0.0062 to +0.0054: s000 average -0.006, s008 average -0.003, pathologic
+  frame -0.005; s004 average and frame +0.005; the rest within +-0.002.
+- The whole-image effect is a clean signal-detection signature, a criterion shift toward 'yes':
+  - centreline recall up on 8 of 10 images (+0.003 to +0.027);
+  - precision down on 10 of 10 (-0.002 to -0.035);
+  - explained and explained_junction up on 10 of 10 (the render explains more of the image's OD, the
+    predictive-coding objective);
+  - junction F1 strict up on 7 of 10 (pathologic average +0.082);
+  - junction type balance down on 6 of 10 (the new nodes carry no proposal type, so they are exported as
+    'branch' / 'compound');
+  - width down on 7 of 10.
+So the composite gain on whole images is at the noise level. The tier-1 gain is mostly the crops'
+over-reward of added edges, as batch 3 found for E10.
+
+Residual recording (E14; fast 0, 2, 8 and fork_wide, cross_a20, empty_average): the junction under-prediction
+shrinks where arms were added. fast0 bifurcation bias -0.43 -> -0.21 (against the E11 recording); fast8 compound
+-0.88 -> -0.81 and crossing -0.49 -> -0.41. The disc share of the squared residual: fast2 0.57 -> 0.52,
+cross_a20 0.17 -> 0.12. On fast8 (pathologic average) the dominant error is unchanged. It is a very wide
+(> 30 px), dark structure at the right edge, and a broad positive residual covers the field: background leak
+plus an unmodelled wide lumen, not missing arms. The added arm covers only part of it.
+
+### Batch 4 summary
+
+| # | commit | change | tier-1 composite | fast | graph | pos | width | explained | expl_junction | probe_score | status | prediction held? |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| E9 | b527f79 | (batch 3, confirmed) | 0.785309 | 0.6870 | 0.610 | 0.752 | 0.768 | 0.772 | 0.770 | 0.884 | - | - |
+| P1 | 3f38019 | controls.py (multi-seed controls; diagnostic) | (pipeline unchanged) | | | | | | | | doc / diagnostic | review findings 1 and 2 confirmed |
+| E12 | ba7302d | retarget renders the pruned network (E11 alone) | 0.786641 | 0.6872 | 0.610 | 0.752 | 0.770 | 0.771 | 0.769 | 0.886 | discard (+0.0013) | yes, every part |
+| E13 | 17b48cc | arms re-proposed from max(OD - R, 0), 20 x MDL | 0.786965 | 0.6942 | 0.621 | 0.753 | 0.773 | 0.776 | 0.773 | 0.880 | discard (+0.0017) | partly: one crop; whole images exact no-op |
+| E14 | ffc8257 | E13 with the ordinary MDL cost | 0.788423 | 0.6996 | 0.633 | 0.749 | 0.760 | 0.791 | 0.795 | 0.877 | **keep**, tier 2 confirm | yes (upper end); controls -0.037 |
+
+**Tier 2:** E14 0.760839 against 0.760603, confirmed (deterministic, digest c829ed334440a0f9).
+
+**Tuning curves (E14 against E9).**
+- Thresholds: none moved. Width 2.5, blur 25, contrast 0.25, fork 4/5, crossing angle 30, depth 5, T 2/2, gap
+  2.0, ends 2/2, rbc 2/2, empty 2/2.
+- Sweep means: fork 0.871 -> 0.853 (fork_asym's texture arms), rbc 0.936 -> 0.869 (capillary_average's lump
+  arm), crossing_width 0.900 -> 0.907. The rest are identical.
+- Multi-seed controls: lines, empty and fork/cross all down, which is the false-alarm side of the criterion
+  shift.
+
+**What the batch taught.**
+1. The single-seed battery is a biased instrument in BOTH directions. It over-rated E5/E6 (one lump counted six
+   times) and under-rates E14's false arms (2 of 34 probes against 10 of 42 control fits). The multi-seed
+   controls (controls.py, 3-4 min) are now the check for any change that moves probes. A re-baseline of the
+   frozen battery that averages over imaging seeds is the evaluator fix to propose at a batch boundary.
+2. Re-proposal from the prediction error works as a mechanism: 13 of 28 arms on pathologic average are real
+   vessels, and the render explains more of every whole image. The arms' acceptance test is the weak part. The
+   MDL gain cannot separate texture arms (a 0.005-0.03) from faint true arms (no feature separates them in the
+   recording), so the cost only moves the criterion: at 20 x every arm is rejected (a no-op), at 1 x hits and
+   false alarms both rise and the composite stays flat on whole images.
+3. A reverted hypothesis must leave no trace: restoring the pre-re-proposal network when every arm is
+   rejected made E13 digest-identical on 41 of 44 tier-1 cases and on whole images. Without it, the extra
+   joint iterations alone moved the scores (pilot: s004 average -0.008 with every arm rejected).
+4. Fast crops over-reward added edges, again: E13's +0.072 crop gain was 0 on the whole image, and E14's
+   +0.0126 fast gain is +0.0002 on tier 2.
+5. The retarget fix (E12) is a probe-only +0.001 on stage-8 proposals, so it does not matter at this scale.
+
+**Directions for the next batch (ranked).**
+1. Give the re-proposed arms a calibrated acceptance test instead of an MDL cost (signal-detection theory;
+   CFAR). Measure each arm's matched-filter statistic, its fitted template's weighted correlation with the
+   residual, against a null of the same template translated onto the image's own vessel-free background
+   (outside stage 1's mask and the render's support). Accept an arm above that null's family-wise criterion.
+   The controls (false arms on 10 of 42 fits) and tier 2 (precision down on 10 of 10) are the pre-registered
+   tests: precision back to E9 level, recall and explained_junction kept.
+2. Type the new nodes from their arm pattern: deg-3 nodes from a re-proposed arm are exported 'branch' with no
+   fork / confluence / pseudo-T type, and junction type balance fell on 6 of 10 images. Use neuromimetic's
+   typing rule (_type_of on the fitted arms) for the new nodes only.
+3. Very wide dark structures (pathologic) are neither proposed nor modelled. They leak into B, and fast8's
+   residual is dominated by one. A coarse channel (scales > 24 px) or a background-leak test on the residual
+   is needed before arms matter there.
+4. Recommend the evaluator re-baseline (the battery averaged over 3-5 imaging seeds) through the bug-fix
+   protocol, so that tier 1 sees false alarms and lump artifacts at their true rate.
