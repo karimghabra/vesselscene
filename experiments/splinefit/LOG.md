@@ -381,3 +381,55 @@ unchanged (width 2.5 px, blur 25 d_c, contrast hct 0.25, fork 4/5, crossing_angl
    tying s to the image-wide optics (or fitting s jointly per image) for edges with r < s.
 4. Decouple positions from the cleaned target inside the joint stage; explaining away after MDL removals;
    the flank / pedestal deficit along wide vessels; parallel_g2 (batch 1 directions 2-5, still open).
+
+## Batch 3
+
+Setup: last kept = last confirmed = 7b44ac6 (E6; tier 1 0.785308, tier 2 0.760600, digest bcdbe0a268f3c3a7).
+
+### Priority 1: the review's findings
+
+**Finding 1 (determinism across run histories): confirmed and fixed.** vesselmap's `entry_core` is
+`torch.compile(dynamic=True)`. Past dynamo's recompile limit it falls back to eager, so one image's floats
+depended on which shapes ran before it in the same process. The fix sets `set_threads` to
+`VESSELMAP_COMPILE=0`, which runs the render eagerly (be34189). Tier 1 (re-baseline): composite 0.785309
+against E6's 0.785308. Every part is equal to 1e-5 and the digest is new, `d56fee848ca3e349`. It ran in
+303 s, so eager is not slower here: a fresh compile on each new shape class cost about as much as it
+saved. A new diagnostic, `determinism.py`, re-runs each row of a saved run in its own fresh process. On the
+10 fast crops all 10 fresh digests equal the in-run digests. The review's eager digests for s007 average
+(d860f99a) and pathologic average (51907319) are reproduced exactly. From now on a composite difference
+below about 5e-4 on one image is treated as noise, and tier-2 `deterministic: True` comes with a fresh-process
+check.
+
+**Finding 2 (the size of E3's gain): confirmed, so the size is corrected.** Per-crop pos from v0 to E3:
+pathologic_s000 average went from 0.226 to 0.588 (+0.362). That one crop supplies 0.036 of the mean +0.064.
+Without it the gain is +0.031 over 9 crops, two of which lost pos (s000 average -0.038, pathologic frame
+-0.038). The review also showed that part of the median-offset gain is a matching-selection effect: E3 matches
+fewer samples, and the ones it drops had large offsets. On the samples matched by both runs, weighted MEAN
+offsets do not improve. The corrected statement: E3 removes the small drift in the last iterations (median
+offset on commonly matched samples improves on every image checked), worth about +0.03 pos on crops and +0.032
+on whole images (tier 2). It does not remove the tail errors. The batch-1 table's 'pos gain 2-6x the
+prediction' should read 'about 1-3x the prediction once the one degenerate crop is excluded'.
+
+### Recording before the experiments: a signal-detection view of the prune (ORACLE diagnostic, scratch)
+
+Every edge at prune time on the 10 fast crops and 34 probes was recorded with its gains (with and without
+node cores, smooth-background-orthogonal), its MDL penalty, its contrast-to-noise and flank fraction, and a
+truth label (at least half its 1 px samples within max(3, r/2) px of an observable true sample). The
+findings:
+- On the fast crops the joint prune is almost irrelevant. It removes 349 of 18820 px of true length
+  (1.9 %) and 188 of 1080 px of false length. Recall (0.63 on fast) is lost upstream, in the proposal.
+- The node-core dual gain (site_mask) and min_gain_per_px decide NO removal in the 44 cases. Of the
+  wide-edge smooth-background test, one removal is decisive: probe end_blind's false wide edge (g_all 511
+  >> pen 14, g_bg -177). The flank test decides every probe illumination-lump removal.
+- The correlation area of the precision-normalised texture, measured on stage 1's background, is 33-61 px^2
+  on frames and 92-125 px^2 on averages (probes 64-103), against corr_px = 6. A per-image corr_px
+  would make the AVERAGES stricter and the frames more lenient. That is the opposite of what E7/E8 need
+  (averages lose true faint vessels, frames keep false texture edges), so that idea was dropped without a run.
+
+### E9: delete the node-core dual gain and min_gain_per_px (pre-registered; simplification)
+
+Hypothesis: the in-silico lesion above shows that neither criterion decides a removal, so both are dead code
+on tier 1. Change: the prune uses the plain junction-aware gain (no site_mask exclusion, no max of two gains)
+and only the MDL inequality, the smooth-background test for wide edges and the flank test.
+Prediction: the tier-1 digest is IDENTICAL (d56fee848ca3e349): every part is equal, composite 0.785309, and it
+is kept on simplicity (about 30 fewer lines). Tier 2 may differ on whole images, where a node core could decide.

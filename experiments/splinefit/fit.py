@@ -23,9 +23,8 @@ test are divided by corr_px (one independent observation per correlation area).
 
 Schedule (fixed iteration counts, FitConfig): profiles + optics with the geometry frozen, then everything
 jointly (anchored to where the stage started, vesselmap's tracking prior), then MDL pruning (an edge must
-explain more NLL than its description costs: vesselmap's n_params x log(pixels) x mdl_scale / 2; the larger of
-the gains with and without the node-site cores, where the additive gain approximation of a union is wrong;
-a faint wide edge must also be seen against background on both flanks, else it is the illumination roll-off
+explain more NLL than its description costs: vesselmap's n_params x log(pixels) x mdl_scale / 2, with the
+gain of the junction-aware prediction; a faint wide edge must also be seen against background on both flanks, else it is the illumination roll-off
 at the aperture or frame, two_flanked), topology clean-up, retarget, and a final fit of the profiles and optics with the geometry frozen (a
 re-cleaned target exposes OD the network does not explain, e.g. missed vessels, and free centrelines slide
 into it). The optimiser loop is adapted from LIMBUS vesselmap.fit.optimize (same author), with the kappa
@@ -72,7 +71,6 @@ class FitConfig:
     junctions: bool = True          # False: vesselmap's plain additive render (the lesion)
     corr_px: float = 6.0            # px^2, correlation area of the OD texture
     mdl_scale: float = 0.25         # x vesselmap's BIC cost (the proposals were already MDL-vetted upstream)
-    min_gain_per_px: float = 0.2    # after the corr_px scaling
     wide_test_w: float = 8.0        # px, r + s from which an edge must also beat a smooth background
     wide_bg_sigma: float = 25.0     # px, the smooth background's scale in that test
     flank_k: float = 2.0            # a wide edge's flanks lie at r + flank_k s from its centreline ...
@@ -156,24 +154,6 @@ def optimize(model: JunctionModel, iters: int, cfg: FitConfig, fit_pos=True, anc
 
 
 @torch.no_grad()
-def site_mask(model: JunctionModel, kinds=("node",)) -> np.ndarray:
-    """Pixels in the core of the model's junction sites of the given kinds: discs of radius r_max + 2 s_max
-    (the members' widest lumen and blur there) around each node of the site, where the lumens overlap."""
-    H, W = model.H, model.W
-    m = np.zeros((H, W), bool)
-    yy, xx = np.mgrid[0:H, 0:W]
-    for s in getattr(model, "site_info", []):
-        if s["kind"] not in kinds:
-            continue
-        r = s["core"]
-        for cx, cy in s["centres"]:
-            x0, x1 = max(0, int(cx - r - 1)), min(W, int(cx + r + 2))
-            y0, y1 = max(0, int(cy - r - 1)), min(H, int(cy + r + 2))
-            m[y0:y1, x0:x1] |= (xx[y0:y1, x0:x1] - cx) ** 2 + (yy[y0:y1, x0:x1] - cy) ** 2 <= r * r
-    return m
-
-
-@torch.no_grad()
 def edge_gains(model: JunctionModel, exclude: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
     """NLL decrease each edge is responsible for (vesselmap NetworkModel._entry_gains: removing the edge's
     entries, halo included, all else fixed), with the residual of the full junction-aware prediction and
@@ -232,12 +212,7 @@ def prune(net: VesselNetwork, model: JunctionModel, cfg: FitConfig, log=None, ok
     Returns removed ids."""
     if not model.eids:
         return []
-    # two estimates: without the node-site cores (where removing an arm's additive entries is not what the
-    # union render does) and with them (a short wide edge may lie entirely inside a core); an edge is kept
-    # when either pays for it
-    g_out, counts = edge_gains(model, exclude=site_mask(model, ("node",)))
-    g_all, _ = edge_gains(model)
-    gains = np.maximum(g_out, g_all)
+    gains, counts = edge_gains(model)
     # wide edges must also beat the background (vesselmap score_and_prune): their gain re-evaluated with the
     # low-frequency part of their contribution given to a smooth background, so a broad dark lump of
     # background texture is not kept as a wide, faint 'vessel'
@@ -260,7 +235,7 @@ def prune(net: VesselNetwork, model: JunctionModel, cfg: FitConfig, log=None, ok
         free = min(deg.get(e.u, 0), deg.get(e.v, 0)) <= 1
         if cfg.prune_free_only and not free:
             continue
-        if gains[k] < pen or gains[k] / L < cfg.min_gain_per_px:
+        if gains[k] < pen:
             removed.append(eid)
         elif ok is not None and k in wide and float(np.mean(e.a)) < cfg.flank_a and \
                 two_flanked(net, eid, ok, cfg.flank_k) < cfg.flank_min:
