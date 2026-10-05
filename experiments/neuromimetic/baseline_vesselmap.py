@@ -14,13 +14,25 @@ that do not pay for themselves (BIC / MDL).  This module only converts the input
     direction), 4 or more -> 'crossing' when the arms pair into two near-collinear through lines, else
     'compound' (``baseline_hessian.type_from_arms``, the same rule as the Hessian baseline);
   * plus ``net.crossings()``: vesselmap does not make crossings nodes (an edge passes over another), so the
-    points where two edges overlap without sharing a node are added as 'crossing'.
+    points where two edges overlap without sharing a node are added as 'crossing', but only true X crossings:
+    the two edges' tangents there must be transversal (``|cos| < CROSS_COS``), the point must be farther than
+    ``CROSS_END_WIDTHS`` vessel widths (and 8 px) from either edge's end nodes (nearer, it is a T or a touch),
+    and an edge pair gives at most one crossing (the most transversal; a pair that overlaps in several places
+    is a duplicated, parallel or touching pair).  Unfiltered, about two thirds of the points were such
+    artefacts (on the dev scenes 26 of 36 points on healthy_s004 average came from overlapping pairs), and the
+    permissive junction radii let them match truth junctions of other types.
+
+The harness cuts the polylines at the exported junctions before its edge scores, so an edge that passes over
+a crossing counts like two edges cut there (the Hessian baseline's convention).
 
 build_map takes minutes per image, so each network (``VesselNetwork.to_dict``, with the build time and the
-MapConfig overrides) is cached under ``_cache/vesselmap/<sha256 of the image bytes>[:16].json`` (keyed by the
-image content only) and later runs reuse it; the export above runs on the cached network every time.  vesselmap is not
-bit-reproducible (torch reductions on several threads), so a cached result is what makes a rerun identical;
-the harness's determinism check is only meaningful with the cache empty.
+MapConfig overrides) is cached under ``_cache/vesselmap/<key>.json``; the key hashes the image bytes, the
+MapConfig overrides and the vesselmap sources (``_key``), so a changed config or vesselmap gets its own entry.
+Later runs reuse it; the export above runs on the cached network every time, and the output carries
+``build_seconds`` and ``vesselmap_config`` (the harness copies both into its row; its ``seconds`` of a cached
+run is the export time).  vesselmap is not bit-reproducible (torch reductions on several threads), so a cached
+result is what makes a rerun identical: the harness's determinism check (``--repeat 2``) is only meaningful
+with the cache empty.
 """
 from __future__ import annotations
 
@@ -41,10 +53,30 @@ FAST = dict(reps_per_band=2, penalty_scale=3.0)
 CONFIG = dict(FAST) if os.environ.get("VESSELMAP_CONFIG") == "fast" else {}
 ARM_LOOK_PX = 8.0           # arm direction from the edge's last 8 px at the node
 CROSS_DEDUP_PX = 6.0        # a crossing point this close to a listed junction is the same junction
+CROSS_COS = 0.7             # an X crossing: the two tangents within ~45 deg of perpendicular ...
+CROSS_END_WIDTHS = 1.5      # ... and the point this many vessel widths (and 8 px) from either edge's end nodes
+_VERSION = []
 
 
-def _key(image: np.ndarray) -> str:
-    return hashlib.sha256(np.ascontiguousarray(image, np.float32).tobytes()).hexdigest()[:16]
+def vesselmap_version() -> str:
+    """sha256 of the vesselmap package sources (the clone is read-only, but a changed checkout re-keys)."""
+    if not _VERSION:
+        h = hashlib.sha256()
+        src = os.path.join(LIMBUS, "vesselmap")
+        for name in sorted(os.listdir(src)):
+            if name.endswith(".py"):
+                with open(os.path.join(src, name), "rb") as fh:
+                    h.update(name.encode() + fh.read())
+        _VERSION.append(h.hexdigest()[:16])
+    return _VERSION[0]
+
+
+def _key(image: np.ndarray, config: dict | None = None) -> str:
+    """Cache key: the image bytes, the MapConfig overrides and the vesselmap sources."""
+    h = hashlib.sha256(np.ascontiguousarray(image, np.float32).tobytes())
+    h.update(json.dumps(CONFIG if config is None else config, sort_keys=True).encode())
+    h.update(vesselmap_version().encode())
+    return h.hexdigest()[:16]
 
 
 def _limbus():
@@ -63,7 +95,8 @@ def _run_vesselmap(image: np.ndarray) -> dict:
     inten = np.clip(np.asarray(image, np.float32) / FULL_SCALE, 0.0, 1.0)     # NaN stays NaN
     t0 = time.perf_counter()
     net = build_map(inten, MapConfig(verbose=True, **CONFIG))
-    return dict(seconds=round(time.perf_counter() - t0, 1), config=dict(CONFIG), net=net.to_dict())
+    return dict(seconds=round(time.perf_counter() - t0, 1), config=dict(CONFIG), vesselmap=vesselmap_version(),
+                net=net.to_dict())
 
 
 def export(net) -> dict:
@@ -82,14 +115,27 @@ def export(net) -> dict:
             dirs += [smp["tan"][j], -smp["tan"][j]]
         n = net.nodes[nid]
         junctions.append((float(n.x), float(n.y), type_from_arms(np.array(dirs))))
+    best = {}                                         # X crossings only, at most one per edge pair
     for c in net.crossings():
-        if all(np.hypot(c["x"] - j[0], c["y"] - j[1]) > CROSS_DEDUP_PX for j in junctions):
-            junctions.append((float(c["x"]), float(c["y"]), "crossing"))
+        p = np.array([c["x"], c["y"]])
+        cos, far = [], True
+        for e in c["edges"]:
+            smp = net.sample(e, 0.7)
+            j = int(np.argmin(np.hypot(*(smp["xy"] - p).T)))
+            cos.append(smp["tan"][j])
+            reach = max(8.0, CROSS_END_WIDTHS * 2.0 * float(smp["r"][j]))
+            far &= all(np.hypot(*(net.nodes[n].xy - p)) > reach for n in (net.edges[e].u, net.edges[e].v))
+        a = abs(float(cos[0] @ cos[1]))
+        if far and a < CROSS_COS and (c["edges"] not in best or a < best[c["edges"]][0]):
+            best[c["edges"]] = (a, float(c["x"]), float(c["y"]))
+    for _, x, y in (best[k] for k in sorted(best)):
+        if all(np.hypot(x - j[0], y - j[1]) > CROSS_DEDUP_PX for j in junctions):
+            junctions.append((x, y, "crossing"))
     return dict(polylines=polylines, junctions=junctions)
 
 
 def annotate(image: np.ndarray, valid: np.ndarray) -> dict:
-    """vesselmap's map of one still, as polylines and typed junctions (the network cached by image content)."""
+    """vesselmap's map of one still, as polylines and typed junctions (the network cached, ``_key``)."""
     os.makedirs(CACHE_DIR, exist_ok=True)
     path = os.path.join(CACHE_DIR, _key(image) + ".json")
     if os.path.exists(path):
@@ -103,6 +149,7 @@ def annotate(image: np.ndarray, valid: np.ndarray) -> dict:
         os.replace(tmp, path)
     _limbus()
     from vesselmap.network import VesselNetwork
+    assert res["config"] == CONFIG and res.get("vesselmap") == vesselmap_version(), (path, res["config"])
     out = export(VesselNetwork.from_dict(res["net"]))
-    out["build_seconds"] = res["seconds"]
+    out.update(build_seconds=res["seconds"], vesselmap_config=res["config"])
     return out

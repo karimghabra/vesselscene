@@ -75,6 +75,8 @@ class Config:
     rounds: int = 2
     repropose: bool = True
     re_k: float = 1.0                   # thresholds of the re-proposal readout, x t_high / t_low
+    re_novel: float = 2.0               # a re-proposed trace needs re_novel x min_len px outside rendered lumens
+    jmask_k: float = 0.7                # junction discs (x radius) carry no weight in the MDL gains
     corr_px: float = 6.0                # px^2, correlation area of the OD noise (texture) for the gains
     mdl_k: float = 2.0                  # description cost of an edge: mdl_k (1 + length / mdl_len)
     cnr_min: float = 0.5                # an edge's OD profile must reach this band CNR (~0.23 x the truth's scale)
@@ -1159,16 +1161,19 @@ class _Render:
         self.alive = np.ones(len(edges), bool)
 
     def gain(self, k: int) -> float:
-        """Noise-weighted fall of the squared residual that edge k brings, given the others:
-        sum((r + p)^2 - r^2) / s^2 = sum(2 r p + p^2) / s^2 over its tube, r the residual with k rendered,
-        divided by the correlation area corr_px. Negative where k duplicates what others already explain."""
+        """Noise-weighted fall of the squared residual that edge k brings, given the others, with its
+        amplitude re-fitted (its tube as a template p, c >= 0): (sum p r_-k / s^2)^2 / sum p^2 / s^2, r_-k
+        the residual without k, over the correlation area corr_px. A duplicate of what the others already
+        explain finds no positive residual left (gain ~ 0); an over-estimated own contrast does not matter."""
         idx, p = self.tubes[k]
         if not len(idx):
             return 0.0
-        r = self.t[idx] - self.R[idx]
-        if not self.alive[k]:
-            r = r - p
-        return float(((2 * r * p + p * p) * self.iw[idx]).sum()) / self.cfg.corr_px
+        r = self.t[idx] - self.R[idx] + (p if self.alive[k] else 0.0)
+        w = self.iw[idx]
+        num, den = float((p * r * w).sum()), float((p * p * w).sum())
+        if num <= 0 or den <= 0:
+            return 0.0
+        return num * num / den / self.cfg.corr_px
 
     def remove(self, k: int):
         idx, p = self.tubes[k]
@@ -1194,8 +1199,9 @@ def _mdl_prune(OD, sigma2, edges, cfg, rms=None):
     spur, a false arm or extension; an edge between two junctions belongs to a vessel that continues) that
     falls furthest short of either test, updating the render and its overlapping neighbours, until every
     such edge passes both:
-      gain >= mdl_k (1 + length / mdl_len)  (the squared residual it removes pays for its description; a
-      duplicate of what other edges already render has a negative gain: explaining away), and
+      gain >= mdl_k (1 + length / mdl_len)  (the squared residual it removes, its contrast re-fitted against
+      what the other edges leave, pays for its description; a duplicate finds nothing left: explaining away),
+      and
       CNR = a max_b resp_b(r, s) / RMS_b >= cnr_min  (its OD profile in stage 2's band b against the local
       background RMS of that band along it: the band-matched visibility the truth itself uses).
     Returns (keep flags, the render)."""
@@ -1288,6 +1294,24 @@ def _remove_ranges(traces: list, edges: list, keep: list, cfg: Config) -> list:
     return out
 
 
+def _junction_mask(shape, junctions, cfg) -> np.ndarray:
+    """Discs of jmask_k x the radius around the junctions: where the lumens of a fork are a union and the
+    additive render is not exact (no evidence is weighed there)."""
+    m = np.zeros(shape, np.uint8)
+    for J in junctions:
+        cv2.circle(m, (int(round(J["x"])), int(round(J["y"]))), int(round(cfg.jmask_k * J["r"])), 1, -1)
+    return m > 0
+
+
+def _core_mask(shape, edges) -> np.ndarray:
+    """The lumens (half width r) of the rendered edges."""
+    m = np.zeros(shape, np.uint8)
+    for e in edges:
+        Q = np.round(e["xy"]).astype(np.int32).reshape(-1, 1, 2)
+        cv2.polylines(m, [Q], False, 1, thickness=2 * int(round(float(np.median(e["pr"])))) + 1)
+    return m > 0
+
+
 def _assemble_profiled(traces, cfg, OD):
     """Stage 7, then every trace's OD profile (fit_profiles) and its slice on each edge."""
     edges, junctions, traces = end_stopping(traces, cfg, OD)
@@ -1321,16 +1345,23 @@ def refine(pr: dict, traces: list, cfg: Config = DEFAULT, debug: dict | None = N
     sig2 = np.where(s1["ok"], sig2, 1e12)              # invalid pixels carry no weight
     for rnd in range(cfg.rounds + 1):
         edges, junctions, traces = _assemble_profiled(traces, cfg, OD)
-        keep, rd = _mdl_prune(OD, sig2, edges, cfg, s1.get("rms"))
+        jm = _junction_mask(OD.shape, junctions, cfg)
+        keep, rd = _mdl_prune(OD, np.where(jm, 1e12, sig2), edges, cfg, s1.get("rms"))
         traces = _remove_ranges(traces, edges, keep, cfg)
         if rnd < cfg.rounds and cfg.repropose:
-            res = rd.residual()
+            # what the graph does not explain: the positive residual (an over-predicted knot proposes
+            # nothing), outside the junction regions, where the additive render of a fork is not exact
+            res = np.maximum(rd.residual(), 0) * (1 - _gblur(jm.astype(np.float32), 2.0))
             new = _channel_traces(res, bg, s1["ok"], cfg, t_high=cfg.t_high * cfg.re_k, t_low=cfg.t_low * cfg.re_k)
             # the graph's own vessels count as coarser than any proposal: misfit echoes along their walls
             # (parallel, inside 0.6 of their width) are not new vessels
             acc = [dict(t, chan=len(cfg.channels)) for t in traces]
-            merged = merge_channels(new, cfg, accepted=acc, shape=OD.shape)
-            traces = traces + merged[len(acc):]
+            merged = merge_channels(new, cfg, accepted=acc, shape=OD.shape)[len(acc):]
+            core = _core_mask(OD.shape, [e for e, k in zip(edges, keep) if k])
+            for t in merged:                          # novel: mostly outside the lumens already rendered
+                ix = np.clip(np.round(t["xy"]).astype(int), 0, [OD.shape[1] - 1, OD.shape[0] - 1])
+                if float((~core[ix[:, 1], ix[:, 0]]).sum()) >= cfg.re_novel * cfg.min_len:
+                    traces.append(t)
     edges, junctions, traces = _assemble_profiled(traces, cfg, OD)
     rd = _Render(OD, sig2, edges, cfg)
     _knots(junctions, edges, rd, cfg)
