@@ -61,6 +61,15 @@ crossings; reads the truth to know where to look) and `determinism.py` (re-runs 
 run_experiment JSON, each in a fresh process, and compares digests: tier 2's 'deterministic' flag only
 compares two runs inside one process). vesselmap's torch.compile is off (`set_threads` sets
 VESSELMAP_COMPILE=0): its per-shape cache made an image's floats depend on the images run before it.
+`controls.py` re-renders six battery stimuli (empty average / frame, line_d3, line_d6_h0.25, fork_wide,
+cross_a45) with imaging seeds 1-7 and reports the mean probe_composite per stimulus: the battery uses ONE
+imaging draw (seed 11), so a change that moves probes must also move these controls to count as real
+(`python -m experiments.splinefit.controls`, ~4 min).
+
+Since batch 4 the fit re-proposes ARMS from its own prediction error (`repropose.py`, after the MDL prune):
+neuromimetic stages 3-6 on max(OD - R, 0), kept when novel (outside the render's support) and attached to an
+existing edge (to its node, or splitting it), then 40 joint iterations and a second prune; if every arm is
+rejected the network reverts to its state before the re-proposal.
 
 ## How to run
 
