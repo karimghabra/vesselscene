@@ -50,13 +50,11 @@ class Config:
     t_low: float = 1.7
     min_len: float = 10.0               # px, shortest trace kept
     border_px: int = 3                  # no line candidates this close to the frame or to invalid pixels
-    tracker: bool = True                # tangent tracker (else skeletons of SE(2) components)
     look_px: int = 3                    # the tracker looks this far ahead (bridging 1-2 px gaps)
     pass_px: int = 4                    # ... and passes through another trace's claim for at most this long
     claim_k: float = 0.5                # a sample claims +-max(1, claim_k sigma) px across (its lumen)
     dup_bins: int = 1                   # channel merge: parallel = within this many 11.25 deg bins (duplicates)
     wall_bins: int = 0                  # ... and for the wall echoes inside a coarser vessel
-    spur_len: float = 5.0               # px, terminal skeleton branches shorter than this (+ width) are cut
     # 7. graph assembly
     gap_att: float = 6.0                # px beyond the other vessel's half width an end may attach
     att_cone_deg: float = 45.0          # ... within this cone ahead of the end
@@ -79,7 +77,7 @@ class Config:
     re_k: float = 1.0                   # thresholds of the re-proposal readout, x t_high / t_low
     corr_px: float = 6.0                # px^2, correlation area of the OD noise (texture) for the gains
     mdl_k: float = 2.0                  # description cost of an edge: mdl_k (1 + length / mdl_len)
-    cnr_min: float = 2.0                # an edge's rendered profile must reach this band CNR
+    cnr_min: float = 0.5                # an edge's OD profile must reach this band CNR (~0.23 x the truth's scale)
     mdl_len: float = 20.0
 
 
@@ -329,8 +327,7 @@ def _channel_traces(OD: np.ndarray, bg: np.ndarray, ok: np.ndarray, cfg: Config,
         C, S = _up(C, f, ch["shape"]), _up(ch["S"], f, ch["shape"], nearest=True)
         if keep is not None:
             keep.append(dict(C=C, S=S, sigma=ch["sigma"]))
-        ro = readout if cfg.tracker else _readout_skel
-        traces += ro(C, S, cfg, t_high=t_high, t_low=t_low, chan=ci, valid=ok)
+        traces += readout(C, S, cfg, t_high=t_high, t_low=t_low, chan=ci, valid=ok)
     return traces
 
 
@@ -440,102 +437,6 @@ def _shift(X: np.ndarray, dx: float, dy: float) -> np.ndarray:
     M = np.float32([[1, 0, dx], [0, 1, dy]])
     return cv2.warpAffine(X, M, (X.shape[1], X.shape[0]), flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                           borderMode=cv2.BORDER_REPLICATE)
-
-
-class _DSU:
-    def __init__(self, n):
-        self.p = list(range(n))
-
-    def find(self, a):
-        while self.p[a] != a:
-            self.p[a] = self.p[self.p[a]]
-            a = self.p[a]
-        return a
-
-    def union(self, a, b):
-        a, b = self.find(a), self.find(b)
-        if a != b:
-            self.p[max(a, b)] = min(a, b)
-
-
-def _se2_components(cand: np.ndarray):
-    """Connected components of a (theta, y, x) bool volume, 26-connected, theta circular. Returns the label
-    volume (0 = none) and the number of labels (labels renumbered 1..n in order of first appearance)."""
-    n = cand.shape[0]
-    ext = np.concatenate([cand, cand[:1]], 0)
-    lab, nl = ndi.label(ext, structure=np.ones((3, 3, 3), bool))
-    dsu = _DSU(nl + 1)
-    a, b = lab[0], lab[n]
-    m = (a > 0) & (b > 0)
-    for i, j in zip(a[m].tolist(), b[m].tolist()):
-        dsu.union(i, j)
-    # layer n duplicates layer 0: also join labels that touch layer 0's twin across layer n-1
-    root = np.array([dsu.find(i) for i in range(nl + 1)], np.int64)
-    lab = root[lab[:n]]
-    u, inv = np.unique(lab, return_inverse=True)
-    return inv.reshape(lab.shape).astype(np.int32), len(u) - 1 if u[0] == 0 else len(u)
-
-
-_OFFS = [(-1, -1), (-1, 0), (-1, 1), (0, -1), (0, 1), (1, -1), (1, 0), (1, 1)]
-
-
-def _skeleton_paths(sk: np.ndarray):
-    """The node-to-node pixel paths of a 1-px skeleton under m-adjacency (a diagonal step only where neither
-    4-neighbour between them is set, so staircases are not branch points). Returns a list of (n, 2) int
-    arrays of (y, x), in a deterministic order."""
-    H, W = sk.shape
-    ys, xs = np.nonzero(sk)
-    if not len(ys):
-        return []
-    idx = -np.ones((H + 2, W + 2), np.int64)
-    idx[ys + 1, xs + 1] = np.arange(len(ys))
-    nbrs = [[] for _ in range(len(ys))]
-    for dy, dx in _OFFS:
-        j = idx[ys + 1 + dy, xs + 1 + dx]
-        ok = j >= 0
-        if dy and dx:
-            ok &= (idx[ys + 1 + dy, xs + 1] < 0) & (idx[ys + 1, xs + 1 + dx] < 0)
-        for i in np.flatnonzero(ok).tolist():
-            nbrs[i].append(int(j[i]))
-    deg = np.array([len(v) for v in nbrs])
-    node = deg != 2
-    seen_edge = set()
-    paths = []
-    for s in np.flatnonzero(node).tolist():
-        for nb in nbrs[s]:
-            if (s, nb) in seen_edge:
-                continue
-            path = [s, nb]
-            seen_edge.add((s, nb))
-            prev, cur = s, nb
-            while not node[cur]:
-                nxt = [q for q in nbrs[cur] if q != prev]
-                if not nxt:
-                    break
-                prev, cur = cur, nxt[0]
-                path.append(cur)
-            seen_edge.add((cur, prev))
-            paths.append(path)
-    on_path = np.zeros(len(ys), bool)
-    for p in paths:
-        on_path[p] = True
-    for s in range(len(ys)):                         # cycles without a node
-        if on_path[s]:
-            continue
-        path = [s]
-        on_path[s] = True
-        prev, cur = -1, s
-        while True:
-            nxt = [q for q in nbrs[cur] if q != prev and (not on_path[q] or q == s)]
-            if not nxt:
-                break
-            prev, cur = cur, nxt[0]
-            path.append(cur)
-            if cur == s:
-                break
-            on_path[cur] = True
-        paths.append(path)
-    return [np.stack([ys[p], xs[p]], 1) for p in paths]
 
 
 def _resample(P: np.ndarray, step: float = 1.0) -> np.ndarray:
@@ -683,61 +584,6 @@ def readout(C: np.ndarray, S: np.ndarray, cfg: Config = DEFAULT, t_high=None, t_
     return traces
 
 
-def _readout_skel(C: np.ndarray, S: np.ndarray, cfg: Config = DEFAULT, t_high=None, t_low=None, chan: int = 0,
-                  valid: np.ndarray | None = None) -> list:
-    """The first readout (kept for comparison): SE(2) connected components of the candidates, each
-    component's footprint skeletonised and split into node-to-node paths."""
-    from skimage.morphology import skeletonize
-    t_high = cfg.t_high if t_high is None else t_high
-    t_low = cfg.t_low if t_low is None else t_low
-    n, H, W = C.shape
-    th = orientations(cfg)
-    cand = np.zeros(C.shape, bool)
-    for k, t in enumerate(th):
-        nx, ny = -math.sin(t), math.cos(t)
-        a, b = _shift(C[k], nx, ny), _shift(C[k], -nx, -ny)
-        cand[k] = (C[k] >= a) & (C[k] > b) & (C[k] > t_low)
-    cand &= (C >= np.roll(C, 1, 0)) & (C > np.roll(C, -1, 0))
-    inner = np.ones((H, W), bool) if valid is None else valid.copy()
-    b = cfg.border_px
-    inner[:b], inner[-b:], inner[:, :b], inner[:, -b:] = False, False, False, False
-    if valid is not None and not valid.all():
-        inner &= ndi.binary_erosion(valid, iterations=b)
-    cand &= inner[None]
-    lab, nl = _se2_components(cand)
-    if nl == 0:
-        return []
-    kk, yy, xx = np.nonzero(lab)
-    ll = lab[kk, yy, xx]
-    cv = C[kk, yy, xx]
-    mx = np.zeros(nl + 1, np.float32)
-    np.maximum.at(mx, ll, cv)
-    order = np.argsort(ll, kind="stable")
-    cuts = np.flatnonzero(np.diff(ll[order])) + 1
-    sig = np.asarray(cfg.scales, np.float32)
-    Cmax = C.max(0)
-    Smax = sig[np.take_along_axis(S, C.argmax(0)[None], 0)[0]]
-    traces = []
-    for grp in np.split(order, cuts):
-        l_ = int(ll[grp[0]])
-        if mx[l_] < t_high or len(grp) < cfg.min_len * 0.7:
-            continue
-        y0, y1, x0, x1 = yy[grp].min(), yy[grp].max(), xx[grp].min(), xx[grp].max()
-        m = np.zeros((y1 - y0 + 3, x1 - x0 + 3), bool)
-        m[yy[grp] - y0 + 1, xx[grp] - x0 + 1] = True
-        sk = skeletonize(m)
-        paths = _skeleton_paths(sk)
-        paths = _prune_spurs(paths, cfg, Smax, y0 - 1, x0 - 1)
-        for p in paths:
-            xy = np.stack([p[:, 1] + x0 - 1, p[:, 0] + y0 - 1], 1).astype(float)
-            if _plen(xy) < cfg.min_len:
-                continue
-            xy = _resample(_smooth(xy, 5), 1.0)
-            ix = np.clip(np.round(xy).astype(int), 0, [W - 1, H - 1])
-            traces.append(dict(xy=xy, c=Cmax[ix[:, 1], ix[:, 0]], w=2.5 * Smax[ix[:, 1], ix[:, 0]], chan=chan))
-    return traces
-
-
 def _tangents(P: np.ndarray, k: int = 3) -> np.ndarray:
     n = len(P)
     i0, i1 = np.clip(np.arange(n) - k, 0, n - 1), np.clip(np.arange(n) + k, 0, n - 1)
@@ -807,63 +653,6 @@ def merge_channels(traces: list, cfg: Config = DEFAULT, accepted: list | None = 
             acc.append(piece)
             draw(piece)
     return acc
-
-
-def _prune_spurs(paths, cfg, Smax, oy, ox):
-    """Cut terminal branches shorter than spur_len + the local width and rejoin paths through nodes left with
-    two branches."""
-    def key(p):
-        return (int(p[0][0]), int(p[0][1]))
-    for _ in range(2):
-        if len(paths) <= 1:
-            return paths
-        ends = {}
-        for i, p in enumerate(paths):
-            for e in (tuple(p[0]), tuple(p[-1])):
-                ends.setdefault(e, []).append(i)
-        drop = set()
-        for i, p in enumerate(paths):
-            a, b = tuple(p[0]), tuple(p[-1])
-            na, nb = len(ends[a]), len(ends[b])
-            free_a = na == 1 and _degree_at(paths, a) == 1
-            free_b = nb == 1 and _degree_at(paths, b) == 1
-            L = len(p)
-            wloc = 2.5 * float(Smax[min(p[len(p) // 2][0] + oy, Smax.shape[0] - 1),
-                                    min(p[len(p) // 2][1] + ox, Smax.shape[1] - 1)])
-            if (free_a ^ free_b) and L < cfg.spur_len + 0.5 * wloc:
-                drop.add(i)
-        if not drop:
-            break
-        paths = [p for i, p in enumerate(paths) if i not in drop]
-        paths = _merge_through(paths)
-    return paths
-
-
-def _degree_at(paths, pt):
-    return sum((tuple(p[0]) == pt) + (tuple(p[-1]) == pt) for p in paths)
-
-
-def _merge_through(paths):
-    """Join paths that meet at a pixel shared by exactly two path ends (and nothing else)."""
-    changed = True
-    paths = [np.asarray(p) for p in paths]
-    while changed:
-        changed = False
-        ends = {}
-        for i, p in enumerate(paths):
-            ends.setdefault(tuple(p[0]), []).append((i, 0))
-            ends.setdefault(tuple(p[-1]), []).append((i, 1))
-        for pt in sorted(ends):
-            lst = ends[pt]
-            if len(lst) == 2 and lst[0][0] != lst[1][0]:
-                (i, ei), (j, ej) = lst
-                a = paths[i] if ei == 1 else paths[i][::-1]
-                b = paths[j] if ej == 0 else paths[j][::-1]
-                new = np.concatenate([a, b[1:]], 0)
-                paths = [p for k, p in enumerate(paths) if k not in (i, j)] + [new]
-                changed = True
-                break
-    return paths
 
 
 # ======================================================================== widths from the OD
@@ -941,7 +730,9 @@ def _join_gaps(traces: list, cfg: Config) -> list:
             g = P[b] - P[a]
             gl = math.hypot(*g)
             turn = _angle(D[a], -D[b])
-            if gl > 2:
+            lat = abs(float(D[a][0] * g[1] - D[a][1] * g[0]))
+            wa = float(traces[ta]["w"][-1 if a % 2 else 0])
+            if gl > 2 and not (gl <= 6 and lat <= max(3.0, 0.3 * wa)):   # a short offset gap is still a gap
                 gu = g / gl
                 turn = max(turn, _angle(D[a], gu), _angle(-D[b], gu))
             if turn > cfg.join_turn_deg:
@@ -1155,6 +946,9 @@ def end_stopping(traces: list, cfg: Config = DEFAULT, OD: np.ndarray | None = No
     traces = [t for t in traces if _plen(t["xy"]) >= cfg.min_len]
     traces = _join_gaps(traces, cfg)
     traces.sort(key=lambda t: (-len(t["xy"]), float(t["xy"][0, 0]), float(t["xy"][0, 1])))
+    for t in traces:
+        if "w_ro" not in t:
+            t["w_ro"] = np.asarray(t["w"], float).copy()   # the readout's width (2.5 sigma of its scale)
     if OD is not None and cfg.od_width:
         for t in traces:
             if "w_od" not in t:
@@ -1268,10 +1062,11 @@ def _box(u: np.ndarray, r, s) -> np.ndarray:
     return (ndtr((r - u) / s) - ndtr((-r - u) / s)) / (ndtr(r / s) - ndtr(-r / s))
 
 
-def _box_fit(prof: np.ndarray, us: np.ndarray):
-    """Least-squares fit of profiles (n, m) sampled at us by a box(u; r, s) + b over the (r, s) grid, (a, b)
-    linear. Returns (a, r, s) arrays (a = 0 where nothing positive fits)."""
+def _box_fit(prof: np.ndarray, us: np.ndarray, r_max: float = np.inf):
+    """Least-squares fit of profiles (n, m) sampled at us by a box(u; r, s) + b over the (r, s) grid
+    (r <= r_max), (a, b) linear. Returns (a, r, s) arrays (a = 0 where nothing positive fits)."""
     M = _box(us[None, None, :], _RG[:, None, None], _SG[None, :, None]).reshape(-1, len(us))
+    M[np.repeat(_RG > max(r_max, _RG[0]), len(_SG))] = 0.0
     k = float(len(us))
     m1, m2 = M.sum(1), (M * M).sum(1)
     py, p2 = prof.sum(1), (prof * prof).sum(1)
@@ -1280,7 +1075,7 @@ def _box_fit(prof: np.ndarray, us: np.ndarray):
     A = (pp * k - m1[None] * py[:, None]) / np.maximum(det, 1e-9)
     Bc = (py[:, None] - A * m1[None]) / k
     ss = p2[:, None] - 2 * A * pp - 2 * Bc * py[:, None] + A * A * m2[None] + 2 * A * Bc * m1[None] + Bc * Bc * k
-    ss = np.where(A > 0, ss, np.inf)
+    ss = np.where((A > 0) & (m2[None] > 0), ss, np.inf)
     j = np.argmin(ss, 1)
     ok = np.isfinite(ss[np.arange(len(j)), j])
     a = np.where(ok, A[np.arange(len(j)), j], 0.0)
@@ -1290,12 +1085,14 @@ def _box_fit(prof: np.ndarray, us: np.ndarray):
 def fit_profiles(OD: np.ndarray, xy: np.ndarray, w: np.ndarray, step: int = 6):
     """Contrast, half width and blur along a trace from cross-sections of the cleaned OD target (never a
     filter response): every `step` px, the median cross-section over +-max(6, w) px of the trace, along the
-    normals over +-(1.5 w + 6) px, fitted by a box(u; r, s) + b (_box_fit); linear interpolation between the
-    fits and a running median of 3, so one vessel is rendered without seams. Returns (a, r, s) per point."""
+    normals over +-(w + 6) px, fitted by a box(u; r, s) + b with r <= 0.75 w + 2 (_box_fit; w is the scale
+    the trace was read out at, so a neighbouring wide vessel cannot lend its profile to a thin one); linear
+    interpolation between the fits and a running median of 3, so one vessel is rendered without seams.
+    Returns (a, r, s) per point."""
     n = len(xy)
     wm = float(np.median(w))
     T = _tangents(xy, 2)
-    U = float(np.clip(1.5 * wm + 6.0, 8.0, 60.0))
+    U = float(np.clip(wm + 6.0, 8.0, 60.0))
     us = np.arange(-U, U + 0.01, 0.5)
     X = xy[:, None, 0] - us[None, :] * T[:, None, 1]
     Y = xy[:, None, 1] + us[None, :] * T[:, None, 0]
@@ -1303,7 +1100,7 @@ def fit_profiles(OD: np.ndarray, xy: np.ndarray, w: np.ndarray, step: int = 6):
     cs = np.unique(np.r_[np.arange(0, n, step), n - 1])
     h = int(max(6, round(wm)))
     prof = np.stack([np.median(Pf[max(0, c - h):c + h + 1], 0) for c in cs])
-    a, r, s_ = _box_fit(prof, us)
+    a, r, s_ = _box_fit(prof, us, 0.75 * wm + 2.0)
     if len(cs) >= 3:
         a, r, s_ = (ndi.median_filter(v, 3, mode="nearest") for v in (a, r, s_))
     i = np.arange(n)
@@ -1393,8 +1190,10 @@ def _band_resp(r: float, s: float, bands) -> np.ndarray:
 
 
 def _mdl_prune(OD, sigma2, edges, cfg, rms=None):
-    """Greedy MDL with a visibility floor: remove, one at a time, the edge that falls furthest short of either
-    test, updating the render and its overlapping neighbours, until every edge passes both:
+    """Greedy MDL with a visibility floor: remove, one at a time, the edge with a free end (a whole trace, a
+    spur, a false arm or extension; an edge between two junctions belongs to a vessel that continues) that
+    falls furthest short of either test, updating the render and its overlapping neighbours, until every
+    such edge passes both:
       gain >= mdl_k (1 + length / mdl_len)  (the squared residual it removes pays for its description; a
       duplicate of what other edges already render has a negative gain: explaining away), and
       CNR = a max_b resp_b(r, s) / RMS_b >= cnr_min  (its OD profile in stage 2's band b against the local
@@ -1415,13 +1214,16 @@ def _mdl_prune(OD, sigma2, edges, cfg, rms=None):
             e["cnr"] = cnr[k]
 
     def value(k):
-        return min(rd.gain(k) / cost[k], cnr[k] / cfg.cnr_min if cfg.cnr_min > 0 else np.inf)
+        g = rd.gain(k)
+        vg = g / cost[k] if cost[k] > 0 else (np.inf if g >= 0 else -np.inf)
+        return min(vg, cnr[k] / cfg.cnr_min if cfg.cnr_min > 0 else np.inf)
 
     v = np.array([value(k) for k in range(n)])
     bb = np.array([(idx.min() // W, idx.max() // W, (idx % W).min(), (idx % W).max()) if len(idx) else (0, -1, 0, -1)
                    for idx, _ in rd.tubes]).reshape(-1, 4)
-    while True:
-        cand = np.flatnonzero(rd.alive & (v < 1.0))
+    free = np.array([e["j"][0] is None or e["j"][1] is None for e in edges], bool)
+    while True:                                       # only edges with a free end are candidates: an edge
+        cand = np.flatnonzero(rd.alive & free & (v < 1.0))   # between two junctions is part of a vessel
         if not len(cand):
             break
         k = int(cand[np.lexsort((cand, v[cand]))[0]])
@@ -1490,7 +1292,7 @@ def _assemble_profiled(traces, cfg, OD):
     """Stage 7, then every trace's OD profile (fit_profiles) and its slice on each edge."""
     edges, junctions, traces = end_stopping(traces, cfg, OD)
     for t in traces:
-        t["pa"], t["pr"], t["ps"] = fit_profiles(OD, t["xy"], t["w"])
+        t["pa"], t["pr"], t["ps"] = fit_profiles(OD, t["xy"], t.get("w_ro", t["w"]))
     for e in edges:
         t = traces[e["trace"]]
         a, b = e["rng"]
