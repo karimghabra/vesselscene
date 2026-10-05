@@ -1279,7 +1279,7 @@ the biased input it replaced.
 | R1 | 70c6072 | paired per scene + guards; Config.coarse off (E20a provisional) | 0.785309 | 0.610 | 0.752 | 0.768 | 0.772 | 0.884 | keep (review) | yes: E9 digest d56fee848ca3e349 |
 | E21 | 1f862f7 | coarse on, ridge pixels out of the final fit's data term | 0.784410 | 0.610 | 0.752 | 0.768 | 0.766 | 0.883 | discard | partly: absorption gone, explained below E9 |
 
-**Tier 2:** see below. Pushed state: R1, the E9 pipeline (coarse channel, deep edges and residual
+**Tier 2 (R1, 70c6072, run after a container restart interrupted the batch's own run): composite 0.760603, graph 0.683044, pos 0.803793, width 0.798493, explained 0.912199, explained_junction 0.914852; 2001 s; digest `cf65125bf2fb0dea`; deterministic: True.** Identical to E9's tier 2 in batch 3 (same digest), as predicted: R1 is the E9 pipeline with every provisional switch off, and it reproduces across sessions. Pushed state: R1, the E9 pipeline (coarse channel, deep edges and residual
 re-proposal all provisional, off).
 
 **What the batch taught.**
