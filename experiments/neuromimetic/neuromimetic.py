@@ -93,14 +93,14 @@ class Config:
     pass_k: float = 0.0                 # traces passing within pass_k R of a junction add their arms
     arm_min: float = 6.0                # px, shortest arm counted
     cross_turn_deg: float = 40.0        # a crossing's through pairs turn at most this much
-    compound_r: float = 20.0            # px: a junction region at least this large is typed compound (dev prior)
+    compound_r: float = 16.0            # px: a junction region at least this large is typed compound (dev prior)
     od_width: bool = True               # vessel widths from OD cross-sections (else 2.5 x the filter scale)
     # 8. iterative refinement
     verify: bool = True
-    rounds: int = 2
+    rounds: int = 1                     # fixed number of render / prune / re-propose rounds (2 was worse on dev)
     repropose: bool = True
-    re_k: float = 1.0                   # thresholds of the re-proposal readout, x t_high / t_low
-    re_mdl: float = 1.0                 # description cost multiplier of a re-proposed trace's edges
+    re_k: float = 1.3                   # thresholds of the re-proposal readout, x t_high / t_low
+    re_mdl: float = 20.0                # description cost multiplier of a re-proposed trace's edges
     re_novel: float = 2.0               # a re-proposed trace needs re_novel x min_len px outside rendered lumens
     jmask_k: float = 0.7                # junction discs (x radius) carry no weight in the MDL gains
     corr_px: float = 6.0                # px^2, correlation area of the OD noise (texture) for the gains
