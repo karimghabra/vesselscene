@@ -58,65 +58,6 @@
    }
   }
  },
- "healthy_s001_480x768_frame": {
-  "fit": {
-   "digest": "96d4ad9878190a63",
-   "composite": 0.8039727141171806,
-   "graph_score": 0.7124165228399888,
-   "pos": 0.8119923488882715,
-   "width": 0.8950441663071815,
-   "explained": 0.9795502009876644,
-   "explained_junction": 0.9813726017482789,
-   "explained_true": 0.9854083036405459,
-   "explained_true_junction": 0.9860754658851255,
-   "target_fidelity": 0.9857950121280973,
-   "centreline_f1": 0.8940090970890996,
-   "junction_f1_strict": 0.686868686868687,
-   "crossing_recall": 0.4117647058823529,
-   "junction_type_balanced_coarse": 0.4666666666666666
-  },
-  "proposals": {
-   "digest": "b90b9981547f6869",
-   "composite": 0.7651177573689361,
-   "graph_score": 0.698457375479536,
-   "pos": 0.7116607466947891,
-   "width": 0.8794672491258282,
-   "explained": 0.9042064219543909,
-   "explained_junction": 0.914443154255292,
-   "explained_true": 0.9097866199109071,
-   "explained_true_junction": 0.9186314156037244,
-   "target_fidelity": 0.9707068197216173,
-   "centreline_f1": 0.8578123837228082,
-   "junction_f1_strict": 0.7032967032967032,
-   "crossing_recall": 0.35294117647058826,
-   "junction_type_balanced_coarse": 0.4666666666666666
-  },
-  "vesselmap": {
-   "digest": "b8de26f4991da04f",
-   "composite": 0.7495536641523504,
-   "graph_score": 0.6135437227125606,
-   "pos": 0.7856318535257502,
-   "width": 0.8858832683634471,
-   "explained": 0.9851756948872229,
-   "explained_junction": 0.9888775127706552,
-   "explained_true": 0.990782512311833,
-   "explained_true_junction": 0.9933884735882187,
-   "target_fidelity": NaN,
-   "centreline_f1": 0.7940982662143906,
-   "junction_f1_strict": 0.48192771084337355,
-   "crossing_recall": 0.17647058823529413,
-   "junction_type_balanced_coarse": 0.4102564102564103
-  },
-  "truth": {
-   "n_junctions": 49,
-   "n_edges": 125,
-   "types": {
-    "3-way": 25,
-    "crossing": 17,
-    "compound": 7
-   }
-  }
- },
  "healthy_s002_480x768_average": {
   "fit": {
    "digest": "ce0879c3aaf3b3fa",
@@ -173,65 +114,6 @@
     "3-way": 30,
     "crossing": 33,
     "compound": 55
-   }
-  }
- },
- "healthy_s002_480x768_frame": {
-  "fit": {
-   "digest": "47c8dd609dbb2b9a",
-   "composite": 0.6955426569973139,
-   "graph_score": 0.6083149250498027,
-   "pos": 0.7568837085956871,
-   "width": 0.7721965617296487,
-   "explained": 0.8192308965091396,
-   "explained_junction": 0.8700717160508935,
-   "explained_true": 0.8252142795722696,
-   "explained_true_junction": 0.874834398622797,
-   "target_fidelity": 0.8729654087280329,
-   "centreline_f1": 0.733922906990448,
-   "junction_f1_strict": 0.5921052631578948,
-   "crossing_recall": 0.16129032258064516,
-   "junction_type_balanced_coarse": 0.5162878787878787
-  },
-  "proposals": {
-   "digest": "c1c3783544bc313f",
-   "composite": 0.6780735024474294,
-   "graph_score": 0.6100850236620681,
-   "pos": 0.6658281066873206,
-   "width": 0.8121873624191795,
-   "explained": 0.7601704745918711,
-   "explained_junction": 0.8155414606125918,
-   "explained_true": 0.7658851081425645,
-   "explained_true_junction": 0.8200965122955189,
-   "target_fidelity": 0.8041438338610809,
-   "centreline_f1": 0.7172050693534563,
-   "junction_f1_strict": 0.6143790849673203,
-   "crossing_recall": 0.16129032258064516,
-   "junction_type_balanced_coarse": 0.538510101010101
-  },
-  "vesselmap": {
-   "digest": "3f20c3dc54e04ffd",
-   "composite": 0.6554833828021092,
-   "graph_score": 0.51342794099263,
-   "pos": 0.5993120834041556,
-   "width": 0.8213892403892218,
-   "explained": 0.9719151500413877,
-   "explained_junction": 0.9845269964224398,
-   "explained_true": 0.9787726462199222,
-   "explained_true_junction": 0.9900935577571833,
-   "target_fidelity": NaN,
-   "centreline_f1": 0.6560823876303216,
-   "junction_f1_strict": 0.44755244755244755,
-   "crossing_recall": 0.06451612903225806,
-   "junction_type_balanced_coarse": 0.393939393939394
-  },
-  "truth": {
-   "n_junctions": 100,
-   "n_edges": 265,
-   "types": {
-    "3-way": 30,
-    "crossing": 31,
-    "compound": 39
    }
   }
  },
@@ -294,65 +176,6 @@
    }
   }
  },
- "healthy_s003_480x768_frame": {
-  "fit": {
-   "digest": "3579a4d3cc37d1d3",
-   "composite": 0.7855413038539718,
-   "graph_score": 0.6919204099356877,
-   "pos": 0.818745756070946,
-   "width": 0.8432647770045032,
-   "explained": 0.9754760602413179,
-   "explained_junction": 0.9798428225166078,
-   "explained_true": 0.9846054783426358,
-   "explained_true_junction": 0.9861744690746921,
-   "target_fidelity": 0.9808329362019386,
-   "centreline_f1": 0.8895704362272783,
-   "junction_f1_strict": 0.6458333333333334,
-   "crossing_recall": 0.375,
-   "junction_type_balanced_coarse": 0.44285714285714284
-  },
-  "proposals": {
-   "digest": "5ea1182dea72bfe5",
-   "composite": 0.7417951915483325,
-   "graph_score": 0.6684789016756525,
-   "pos": 0.778172048413002,
-   "width": 0.844866817049755,
-   "explained": 0.8222955788002807,
-   "explained_junction": 0.8383311511877023,
-   "explained_true": 0.8307770168876911,
-   "explained_true_junction": 0.8443026865263492,
-   "target_fidelity": 0.9654993536594323,
-   "centreline_f1": 0.8524868412213512,
-   "junction_f1_strict": 0.6185567010309279,
-   "crossing_recall": 0.375,
-   "junction_type_balanced_coarse": 0.4338624338624339
-  },
-  "vesselmap": {
-   "digest": "8ff2b20217d9e443",
-   "composite": 0.7168471680900224,
-   "graph_score": 0.5656505495514917,
-   "pos": 0.7993515182775053,
-   "width": 0.8266482260167813,
-   "explained": 0.978131615591372,
-   "explained_junction": 0.9843387241018542,
-   "explained_true": 0.9867540077031716,
-   "explained_true_junction": 0.9905585257718277,
-   "target_fidelity": NaN,
-   "centreline_f1": 0.756357080077218,
-   "junction_f1_strict": 0.46511627906976744,
-   "crossing_recall": 0.125,
-   "junction_type_balanced_coarse": 0.36296296296296293
-  },
-  "truth": {
-   "n_junctions": 51,
-   "n_edges": 156,
-   "types": {
-    "3-way": 25,
-    "crossing": 8,
-    "compound": 18
-   }
-  }
- },
  "healthy_s005_480x768_average": {
   "fit": {
    "digest": "081b9498752b7f08",
@@ -409,65 +232,6 @@
     "3-way": 22,
     "crossing": 28,
     "compound": 29
-   }
-  }
- },
- "healthy_s005_480x768_frame": {
-  "fit": {
-   "digest": "2e4c63850b70198e",
-   "composite": 0.8092872637357393,
-   "graph_score": 0.7130742375172865,
-   "pos": 0.8641556052096006,
-   "width": 0.8730458634440743,
-   "explained": 0.9792994012089015,
-   "explained_junction": 0.9838313259365725,
-   "explained_true": 0.9878460887863353,
-   "explained_true_junction": 0.9897751523753479,
-   "target_fidelity": 0.983995815223192,
-   "centreline_f1": 0.8927830003170726,
-   "junction_f1_strict": 0.6861313868613139,
-   "crossing_recall": 0.25,
-   "junction_type_balanced_coarse": 0.4677777777777778
-  },
-  "proposals": {
-   "digest": "02968c5c46813f47",
-   "composite": 0.790283555326156,
-   "graph_score": 0.7219236001722709,
-   "pos": 0.8032530460034973,
-   "width": 0.864887416212645,
-   "explained": 0.9077900692239805,
-   "explained_junction": 0.9142991883053826,
-   "explained_true": 0.9159697715642665,
-   "explained_true_junction": 0.9199214480063085,
-   "target_fidelity": 0.9738083055292202,
-   "centreline_f1": 0.8770304120673923,
-   "junction_f1_strict": 0.7175572519083969,
-   "crossing_recall": 0.25,
-   "junction_type_balanced_coarse": 0.5161904761904762
-  },
-  "vesselmap": {
-   "digest": "04b80ac5cd7d196c",
-   "composite": 0.7720718551739079,
-   "graph_score": 0.6413039435705872,
-   "pos": 0.8303002160027967,
-   "width": 0.8933008969133359,
-   "explained": 0.9849181874155531,
-   "explained_junction": 0.9888476773453967,
-   "explained_true": 0.9931121720644883,
-   "explained_true_junction": 0.9945722903134057,
-   "target_fidelity": NaN,
-   "centreline_f1": 0.8189465185690444,
-   "junction_f1_strict": 0.5043478260869566,
-   "crossing_recall": 0.1875,
-   "junction_type_balanced_coarse": 0.4666666666666666
-  },
-  "truth": {
-   "n_junctions": 76,
-   "n_edges": 202,
-   "types": {
-    "3-way": 24,
-    "crossing": 32,
-    "compound": 20
    }
   }
  },
@@ -530,65 +294,6 @@
    }
   }
  },
- "healthy_s006_480x768_frame": {
-  "fit": {
-   "digest": "923fefcf3d938066",
-   "composite": 0.8124729888636417,
-   "graph_score": 0.7308456079471541,
-   "pos": 0.8346994961120731,
-   "width": 0.873484744212435,
-   "explained": 0.9741168690158801,
-   "explained_junction": 0.9742295379752105,
-   "explained_true": 0.9785962794772318,
-   "explained_true_junction": 0.9781789558037123,
-   "target_fidelity": 0.9792775299564312,
-   "centreline_f1": 0.8791555266773894,
-   "junction_f1_strict": 0.6947368421052633,
-   "crossing_recall": 0.2857142857142857,
-   "junction_type_balanced_coarse": 0.5719576719576719
-  },
-  "proposals": {
-   "digest": "9fd434f3f6e1c588",
-   "composite": 0.7740081851329841,
-   "graph_score": 0.716583403622277,
-   "pos": 0.7729574292446011,
-   "width": 0.856023859873055,
-   "explained": 0.8653176108134173,
-   "explained_junction": 0.824174666615475,
-   "explained_true": 0.8692532474072343,
-   "explained_true_junction": 0.8266325731254143,
-   "target_fidelity": 0.9706359442796508,
-   "centreline_f1": 0.8702411514448131,
-   "junction_f1_strict": 0.6526315789473683,
-   "crossing_recall": 0.21428571428571427,
-   "junction_type_balanced_coarse": 0.5754985754985754
-  },
-  "vesselmap": {
-   "digest": "06c08a33ed931ebe",
-   "composite": 0.6663848467564975,
-   "graph_score": 0.4812044348908572,
-   "pos": 0.7439503439898754,
-   "width": 0.8668988847067239,
-   "explained": 0.9438465471698141,
-   "explained_junction": 0.9818341721847619,
-   "explained_true": 0.9474958687980137,
-   "explained_true_junction": 0.9853427944838223,
-   "target_fidelity": NaN,
-   "centreline_f1": 0.678184445491972,
-   "junction_f1_strict": 0.4000000000000001,
-   "crossing_recall": 0.0,
-   "junction_type_balanced_coarse": 0.2222222222222222
-  },
-  "truth": {
-   "n_junctions": 51,
-   "n_edges": 151,
-   "types": {
-    "3-way": 24,
-    "crossing": 14,
-    "compound": 13
-   }
-  }
- },
  "pathologic_s001_480x768_average": {
   "fit": {
    "digest": "629bdbec8120994e",
@@ -645,65 +350,6 @@
     "3-way": 23,
     "crossing": 24,
     "compound": 51
-   }
-  }
- },
- "pathologic_s001_480x768_frame": {
-  "fit": {
-   "digest": "4b4a72417674f322",
-   "composite": 0.6279076339491284,
-   "graph_score": 0.5458140696949355,
-   "pos": 0.695511448074916,
-   "width": 0.7070559780093822,
-   "explained": 0.7274361685256654,
-   "explained_junction": 0.765522391428531,
-   "explained_true": 0.7332338613463,
-   "explained_true_junction": 0.7702492051494745,
-   "target_fidelity": 0.7638333172811915,
-   "centreline_f1": 0.6870136439334109,
-   "junction_f1_strict": 0.5034965034965035,
-   "crossing_recall": 0.22727272727272727,
-   "junction_type_balanced_coarse": 0.4925407925407925
-  },
-  "proposals": {
-   "digest": "b2e76d767086e00a",
-   "composite": 0.58624012179275,
-   "graph_score": 0.5203459708031064,
-   "pos": 0.5724401862690207,
-   "width": 0.7534191739431519,
-   "explained": 0.6305434581350081,
-   "explained_junction": 0.6640766768358954,
-   "explained_true": 0.6355504589706802,
-   "explained_true_junction": 0.6680912436805956,
-   "target_fidelity": 0.6938443369374039,
-   "centreline_f1": 0.6702294659128252,
-   "junction_f1_strict": 0.5165562913907286,
-   "crossing_recall": 0.09090909090909091,
-   "junction_type_balanced_coarse": 0.40474186307519644
-  },
-  "vesselmap": {
-   "digest": "dc22f8ab41037bb1",
-   "composite": 0.5922390815095105,
-   "graph_score": 0.4666172409422901,
-   "pos": 0.4586568754733148,
-   "width": 0.7512786937956384,
-   "explained": 0.9436471969612398,
-   "explained_junction": 0.9607492759390142,
-   "explained_true": 0.9504883094030013,
-   "explained_true_junction": 0.9666014068846704,
-   "target_fidelity": NaN,
-   "centreline_f1": 0.5911577406550627,
-   "junction_f1_strict": 0.33333333333333337,
-   "crossing_recall": 0.045454545454545456,
-   "junction_type_balanced_coarse": 0.45959595959595956
-  },
-  "truth": {
-   "n_junctions": 90,
-   "n_edges": 260,
-   "types": {
-    "3-way": 26,
-    "crossing": 22,
-    "compound": 42
    }
   }
  }

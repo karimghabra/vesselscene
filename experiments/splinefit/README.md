@@ -11,6 +11,12 @@ experiments that are kept or reset, a results log. The charter every experiment 
 The full report of both experiments, with annotated held-out scenes (truth, proposals, the fitted network and
 vesselmap over the image, renders, residuals and junction close-ups), is [../REPORT.md](../REPORT.md).
 
+**Scope since re-baseline R2: only the averaged still is fitted.** The single frame of a scene is out of
+scope; `fastset.KINDS` is the one switch (the fast crops, the scored probes, tier 2 and the tables follow it).
+The results below were measured on both kinds during the night and are kept as measured; REPORT.md restates
+them for the averaged stills, and [LOG.md](LOG.md) (R2) re-judges the loop's decisions on the averages
+(`rejudge_average.py`, output in results/dev/rejudge_average.txt).
+
 ## Results
 
 **On six held-out scenes (12 images), the fitted spline render explains the vessel OD far better than the

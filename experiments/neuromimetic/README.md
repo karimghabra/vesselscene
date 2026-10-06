@@ -4,6 +4,11 @@
 and from diffusion models (Stable Diffusion), give a deterministic annotator whose output matches the vessel
 graph of a vesselscene still better than curvature (Hessian) analysis?
 
+**Scope note (later, re-baseline R2 of experiments/splinefit): only the averaged still is fitted from now on.**
+The study below covers both kinds; ../REPORT.md section 2 restates it for the averaged stills, where the
+frame-oriented stages (surround, association field, refinement) do not pay: V1 alone at its own thresholds
+scores slightly higher there (figures/heldout_average_ablation.jpg).
+
 **Answer, on six held-out scenes: yes for lines and junctions, and for finding crossings. Junction types are
 only weakly better, and the diffusion-model idea did not help.**
 - **Lines and junctions.** The neuromimetic annotator beats both curvature annotators on all 12 held-out
@@ -387,6 +392,11 @@ python -m experiments.neuromimetic.figures scenes/healthy_s001 --kind frame --cr
                  $N:annotate -o experiments/neuromimetic/figures/heldout_frame_comparison.jpg
 python -m experiments.neuromimetic.figures scenes/healthy_s001 --kind frame --crop 140,170,200,300 --zoom 2 \
     --annotators $N:annotate_v1_only $N:annotate -o experiments/neuromimetic/figures/heldout_frame_ablation.jpg
+python -m experiments.neuromimetic.figures scenes/healthy_s001 --kind average --crop 140,170,200,300 --zoom 2 --cols 2 \
+    --annotators experiments.neuromimetic.baseline_hessian:annotate experiments.neuromimetic.baseline_vesselmap:annotate \
+                 $N:annotate -o experiments/neuromimetic/figures/heldout_average_comparison.jpg
+python -m experiments.neuromimetic.figures scenes/healthy_s001 --kind average --crop 140,170,200,300 --zoom 2 \
+    --annotators $N:annotate_v1_only_own $N:annotate -o experiments/neuromimetic/figures/heldout_average_ablation.jpg
 ```
 
 - **Scene folder names.** The scene CLI names folders `healthy_s001` and so on. `results/heldout` names them

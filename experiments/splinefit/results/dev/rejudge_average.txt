@@ -1,0 +1,42 @@
+TIER 1 (keep if composite >= parent + 0.002, or within 0.002 and simpler)
+decision                       logged   |     both check |  average    crops   probes | verdict
+E1 retarget early              discard  |  -0.0071    ok |  -0.0091  -0.0067  -0.0115 | discard
+E2 anchor_px 1.5               discard  |  -0.0002    ok |  -0.0001  -0.0011  +0.0008 | discard
+E3 final fit, geometry frozen  keep     |  +0.0094    ok |  +0.0102  +0.0114  +0.0089 | keep
+E4 support 6 px                discard  |  -0.0005    ok |  -0.0011  -0.0012  -0.0011 | discard
+E5 wide edge flank test        keep     |  +0.0132    ok |  +0.0123  -0.0136  +0.0382 | keep
+E6 flank test faint only       keep     |  +0.0035    ok |  +0.0066  +0.0137  -0.0005 | keep
+E7 stage-7 proposals           discard  |  +0.0011    ok |  +0.0093  +0.0220  -0.0034 | keep  <-- flips
+E8 E7 + mdl_scale 0.5          discard  |  -0.0056    ok |  +0.0069  +0.0173  -0.0034 | keep  <-- flips
+E9 prune simplification        keep     |  +0.0000    ok |  +0.0000  +0.0000  +0.0000 | keep
+E10 stage-7 + soft wide test   keep     |  +0.0020    ok |  +0.0094  +0.0124  +0.0064 | keep
+E11 pruned retarget            keep     |  +0.0014    ok |  +0.0018  +0.0000  +0.0035 | discard  <-- flips
+E13 re-propose arms, 20x       discard  |  +0.0017    ok |  +0.0050  +0.0145  -0.0044 | keep  <-- flips
+E14 re-propose arms            keep     |  +0.0031    ok |  +0.0075  +0.0222  -0.0073 | keep
+E15 type nodes from arms       discard  |  +0.0000    ok |  +0.0000  +0.0000  +0.0000 | discard
+E16 CFAR arms                  discard  |  -0.0007    ok |  +0.0013  +0.0027  +0.0000 | discard
+E17 two alternations           discard  |  +0.0012    ok |  +0.0009  -0.0008  +0.0025 | discard
+E18 coarse channel             discard  |  +0.0080    ok |  +0.0097  +0.0279  -0.0085 | keep  <-- flips
+E19 + deep proposals           discard  |  +0.0063    ok |  +0.0084  +0.0192  -0.0025 | keep  <-- flips
+E20 novel coarse ridges        keep     |  +0.0032    ok |  +0.0043  +0.0094  -0.0008 | keep
+E20a deep edges off            keep     |  +0.0024    ok |  +0.0037  +0.0083  -0.0008 | keep
+E21 ridges out of data term    discard  |  -0.0054    ok |  -0.0056  -0.0100  -0.0013 | discard
+
+TIER 2 (paired per scene: confirmed if mean > 2 SE, no scene below -5e-4, no guard veto)
+E3                     logged confirm                    | both +0.00663 t  +2.29 confirmed   | average +0.00854 t  +2.44 up 5 down 0 confirmed
+E6                     logged confirm                    | both +0.00008 t  +1.00 provisional | average +0.00017 t  +1.00 up 1 down 0 provisional
+E9 (B3 re-baseline)    logged confirm                    | both +0.00000 t  +0.89 provisional | average +0.00001 t  +1.33 up 0 down 0 provisional
+E10+E11                logged regress                    | both -0.01128 t  -2.44 regressed   | average -0.01337 t  -2.31 up 0 down 5 regressed  veto contrast_rel_err,|contrast_bias|,width_rel_err
+E14                    logged confirm, later provisional | both +0.00024 t  +0.19 provisional | average -0.00023 t  -0.11 up 3 down 2 provisional  veto blur_err_px,contrast_rel_err,|contrast_bias|,width_rel_err
+E20 (deep on)          logged regress                    | both +0.00458 t  +1.50 provisional | average +0.00223 t  +1.59 up 3 down 0 provisional  veto blur_err_px,|contrast_bias|
+E20a (deep off)        logged regress (re-judged)        | both +0.00138 t  +1.83 provisional | average +0.00184 t  +1.95 up 3 down 0 provisional  veto blur_err_px,contrast_rel_err,|contrast_bias|
+R1 final               logged confirm                    | both +0.00000 t   +nan provisional | average +0.00000 t   +nan up 0 down 0 provisional
+
+CONTROLS (mean probe_composite over the multi-seed controls)
+E9    both 0.6427  average 0.6181
+E14   both 0.6056  average 0.5838
+E18   both 0.6372  average 0.6116
+E19   both 0.6396  average 0.6145
+E20   both 0.6426  average 0.6180
+
+tier-1 decisions that flip on the averages: E7 stage-7 proposals, E8 E7 + mdl_scale 0.5, E11 pruned retarget, E13 re-propose arms, 20x, E18 coarse channel, E19 + deep proposals
