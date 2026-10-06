@@ -1413,3 +1413,13 @@ The mask comes from the image's own cleaned OD, never from vesselness (the resid
 reads the OD gains) and possibly changed in E23b (it prunes a moved geometry), explained slightly down or
 unchanged (the mask term trades OD fit), probes: thin and faint lines up, empty unchanged; composite 0 to
 +0.005. Smoke test (pathologic s000 crop 1): E23 -0.0035, E23b +0.046 (graph +0.087): one crop, not evidence.
+
+**E22 result (tier 1, 32247c8): composite 0.791730 (-0.00085 against R2 0.792582): DISCARD (adds code, not
+better).** fast 0.708688 (+0.0011; per scene +0.003 s004, +0.003 pathologic, +0.001 s007, -0.002 s008, 0 s000),
+probes 0.874772 (-0.0028); controls 0.618099 (identical: no edge on an empty background). Prediction: crops held
+(small gain), probes NOT held: line_d6_h0.25 0.799 -> 0.715 (fitted length 147 -> 194 px, graph 0.82 -> 0.63).
+There a cross-trace link at a node joined two false texture pieces into one edge through a false compound node,
+and the longer edge then paid its MDL cost and survived the prune. Continuity helps a true vessel only if it
+never lends length to a false one: a link must not lower the bar a piece has to clear. Config.continuity off.
+The larger fragmentation (paths that leave the truth stroke at junctions, 121 of 134 stretches) is untouched by
+E22; it needs the continuation chosen at the junctions themselves.

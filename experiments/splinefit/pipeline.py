@@ -46,7 +46,9 @@ class Config:
                                     # its explained gain is partly OD absorbed by neighbouring vessels
     deep: bool = False              # ... and deep edges proposed from them. Off (provisional): tier 2
                                     # +0.0032 +- 0.0026 on top of the ridges, one image (batch 6)
-    continuity: bool = True         # E22 (batch 8): vessels continuous through gaps and across traces at nodes
+    continuity: bool = False        # E22 (batch 8): vessels continuous through gaps and across traces at nodes.
+                                    # Off (discarded): tier 1 -0.0009; a cross-trace link made two false texture
+                                    # pieces one edge that the prune then kept (line_d6_h0.25)
     step: float = 0.5               # px, sample spacing of the exported edges
 
 
