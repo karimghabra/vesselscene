@@ -13,6 +13,12 @@ them into the network the renderer fits:
   each other (turn < `cont_turn_deg`) become ONE edge passing through the node (vesselmap's info['through']:
   the parent vessel continues, the branch ends on it), the rest end at the node;
 * free ends (no junction, or a junction left with one end) become degree-1 nodes;
+* continuity (E22, batch 8; `continuity=True`): a vessel is continuous through its junctions and gaps, as
+  vesselscene builds it (a long vessel is tangent-continuous through its junctions). Two free ends that point
+  at each other across a short gap (at most max(GAP_PX, GAP_CAL x calibre), each turning by at most
+  GAP_TURN_DEG onto the bridge, widths within GAP_WIDTH_RATIO, and the cleaned OD along the bridge at least
+  GAP_OD_FRAC of the ends' contrast) become one vessel; at a node, two ends of DIFFERENT traces that continue
+  each other (turn <= XTRACE_TURN_DEG, widths within XTRACE_WIDTH_RATIO) pass through it like same-trace ends;
 * each chain of pieces linked through crossings, joints and through-nodes is one edge: a clamped cubic
   B-spline whose control spacing vesselmap adapts to calibre and curvature (`spacing_for_path`, tolerance
   SPACING_TOL x calibre), with r, s, a
@@ -38,6 +44,12 @@ CONT_TURN_DEG = 40.0        # a trace continuing through a node within this turn
 JOINT_TURN_DEG = 60.0       # two ends at a junction left with two: one vessel when they turn less
 SPACING_TOL = 0.15          # x calibre (r + s): how closely a spline must follow its trace
 END_LOOK_PX = 8.0           # px along an edge for its end direction
+GAP_PX, GAP_CAL = 12.0, 3.0  # E22: a bridge between two free ends is at most max(GAP_PX, GAP_CAL x calibre) long
+GAP_TURN_DEG = 35.0         # E22: each end turns onto the bridge by at most this
+GAP_WIDTH_RATIO = 2.5       # E22: the two ends' half widths within this ratio
+GAP_OD_FRAC = 0.5           # E22: mean cleaned OD along the bridge >= this x the smaller end contrast
+XTRACE_TURN_DEG = 25.0      # E22: ends of different traces continue each other through a node within this turn
+XTRACE_WIDTH_RATIO = 2.0    # E22: ... and half widths within this ratio
 
 
 def _plen(P):
@@ -89,11 +101,69 @@ def _pair_crossing(ends, dirs, traces):
     return best[1], best[2]
 
 
-def build_network(prop: dict, shape) -> tuple[VesselNetwork, dict]:
+def _end_val(e, end, key, n=5):
+    v = np.asarray(e[key], float)
+    return float(np.median(v[:n] if end == 0 else v[-n:]))
+
+
+def _end_xy(e, end):
+    xy = np.asarray(e["xy"], float)
+    return xy[0] if end == 0 else xy[-1]
+
+
+def _bridge_od(OD, p, q):
+    """Mean cleaned OD on the straight segment p -> q (bilinear, 1 px steps, ends excluded)."""
+    from scipy.ndimage import map_coordinates
+    n = max(int(math.ceil(math.hypot(*(q - p)))), 1)
+    t = (np.arange(n) + 0.5) / n
+    P = p[None] + t[:, None] * (q - p)[None]
+    return float(map_coordinates(OD, [P[:, 1], P[:, 0]], order=1, mode="nearest").mean())
+
+
+def _gap_links(edges, free, OD) -> list:
+    """E22: pairs of free ends that one vessel continues through (module docstring), greedy by cost."""
+    info = []
+    for (k, end) in free:
+        e = edges[k]
+        info.append((k, end, _end_xy(e, end), _out_dir(e["xy"], end), _end_val(e, end, "pr"),
+                     _end_val(e, end, "pr") + _end_val(e, end, "ps"), _end_val(e, end, "pa")))
+    cand = []
+    for i in range(len(info)):
+        for j in range(i + 1, len(info)):
+            ki, ei, pi, di, ri, wi, ci = info[i]
+            kj, ej, pj, dj, rj, wj, cj = info[j]
+            if ki == kj:
+                continue
+            v = pj - pi
+            d = math.hypot(*v)
+            G = max(GAP_PX, GAP_CAL * max(wi, wj))
+            if d > G or max(ri, rj) > GAP_WIDTH_RATIO * max(min(ri, rj), 1e-3):
+                continue
+            if d < 2.0:
+                ti = tj = _turn(di, dj) / 2
+            else:
+                u = v / d
+                ti = math.degrees(math.acos(max(-1.0, min(1.0, float(np.dot(di, u))))))
+                tj = math.degrees(math.acos(max(-1.0, min(1.0, float(np.dot(dj, -u))))))
+            if max(ti, tj) > GAP_TURN_DEG:
+                continue
+            if d >= 2.0 and OD is not None and _bridge_od(OD, pi, pj) < GAP_OD_FRAC * min(ci, cj):
+                continue
+            cand.append((ti + tj + 30.0 * d / G, i, j))
+    used, out = set(), []
+    for _, i, j in sorted(cand):
+        if i in used or j in used:
+            continue
+        used |= {i, j}
+        out.append(((info[i][0], info[i][1]), (info[j][0], info[j][1])))
+    return out
+
+
+def build_network(prop: dict, shape, continuity: bool = False) -> tuple[VesselNetwork, dict]:
     """The initial network from a neuromimetic debug dict (edges, junctions with pa/pr/ps profiles).
 
     Returns (net, info) with info = dict(crossings=[dict(x, y, e1, e2)] the proposal's crossings by edge id,
-    node_type={nid: neuromimetic junction type}, node_r={nid: junction radius})."""
+    node_type={nid: neuromimetic junction type}, node_r={nid: junction radius}, links={kind: count})."""
     edges = [e for e in prop["edges"] if len(e["xy"]) >= 2 and _plen(e["xy"]) > 0.5]
     junctions = prop["junctions"]
     inc = {}                                           # junction -> [(edge index, end)]
@@ -102,6 +172,7 @@ def build_network(prop: dict, shape) -> tuple[VesselNetwork, dict]:
             ji = e["j"][end]
             if ji is not None:
                 inc.setdefault(ji, []).append((k, end))
+    nlinks = dict(xtrace=0, gap=0)
     link = {}                                          # (k, end) <-> (k2, end2): one vessel passes
     via = {}                                           # (k, end) -> ('crossing' | 'node' | 'joint', junction)
     node_of = {}                                       # junction -> True when it is a node
@@ -127,13 +198,19 @@ def build_network(prop: dict, shape) -> tuple[VesselNetwork, dict]:
         if len(ends) <= 1:
             continue                                   # a free end
         node_of[ji] = True
-        # continuity: same-trace ends that continue each other pass through (greedy, straightest first)
+        # continuity: same-trace ends that continue each other pass through (greedy, straightest first);
+        # with continuity (E22), ends of different traces too, at a tighter turn and similar widths
         cand = []
         for a in range(len(ends)):
             for b in range(a + 1, len(ends)):
-                if trs[a] == trs[b] and ends[a][0] != ends[b][0]:
-                    t = _turn(dirs[a], dirs[b])
-                    if t <= CONT_TURN_DEG:
+                if ends[a][0] == ends[b][0]:
+                    continue
+                t = _turn(dirs[a], dirs[b])
+                if trs[a] == trs[b] and t <= CONT_TURN_DEG:
+                    cand.append((t, a, b))
+                elif continuity and trs[a] != trs[b] and t <= XTRACE_TURN_DEG:
+                    ra, rb = (_end_val(edges[k], end, "pr") for k, end in (ends[a], ends[b]))
+                    if max(ra, rb) <= XTRACE_WIDTH_RATIO * max(min(ra, rb), 1e-3):
                         cand.append((t, a, b))
         used = set()
         for t, a, b in sorted(cand):
@@ -142,6 +219,15 @@ def build_network(prop: dict, shape) -> tuple[VesselNetwork, dict]:
             used |= {a, b}
             link[ends[a]], link[ends[b]] = ends[b], ends[a]
             via[ends[a]] = via[ends[b]] = ("node", ji)
+            nlinks["xtrace"] += trs[a] != trs[b]
+    if continuity:                                     # E22: bridge the gaps between free ends
+        free = [(k, end) for k, e in enumerate(edges) for end in (0, 1)
+                if (k, end) not in link and (e["j"][end] is None or len(inc.get(e["j"][end], [])) <= 1)]
+        OD = prop.get("s1", {}).get("OD")
+        for a, b in _gap_links(edges, free, None if OD is None else np.asarray(OD, np.float32)):
+            link[a], link[b] = b, a
+            via[a] = via[b] = ("gap", None)
+            nlinks["gap"] += 1
     # chains: walk from unlinked ends through the links
     seen = np.zeros(len(edges), bool)
     chains = []
@@ -188,6 +274,14 @@ def build_network(prop: dict, shape) -> tuple[VesselNetwork, dict]:
                     through.append((ji, sum(len(x) for x in xs) - 1))
                 if np.hypot(*(xy[0] - xs[-1][-1])) < 0.5:
                     xy, pa, pr, ps = xy[1:], pa[1:], pr[1:], ps[1:]
+                elif kind == "gap":                    # E22: a straight bridge, profiles interpolated
+                    p0, p1 = xs[-1][-1], xy[0]
+                    nb = int(math.ceil(math.hypot(*(p1 - p0))))
+                    if nb > 1:
+                        t = np.arange(1, nb) / nb
+                        xs.append(p0[None] + t[:, None] * (p1 - p0)[None])
+                        prof.append(prof[-1][-1][None] * (1 - t[:, None])
+                                    + np.array([pa[0], pr[0], ps[0]])[None] * t[:, None])
             xs.append(xy)
             prof.append(np.stack([pa, pr, ps], 1))
         xy = np.concatenate(xs)
@@ -243,4 +337,4 @@ def build_network(prop: dict, shape) -> tuple[VesselNetwork, dict]:
         net._touch()
     node_type = {n: t for n, t in node_type.items() if n in net.nodes}
     node_r = {n: r for n, r in node_r.items() if n in net.nodes}
-    return net, dict(crossings=cr, node_type=node_type, node_r=node_r)
+    return net, dict(crossings=cr, node_type=node_type, node_r=node_r, links=nlinks)

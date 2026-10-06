@@ -46,6 +46,7 @@ class Config:
                                     # its explained gain is partly OD absorbed by neighbouring vessels
     deep: bool = False              # ... and deep edges proposed from them. Off (provisional): tier 2
                                     # +0.0032 +- 0.0026 on top of the ridges, one image (batch 6)
+    continuity: bool = True         # E22 (batch 8): vessels continuous through gaps and across traces at nodes
     step: float = 0.5               # px, sample spacing of the exported edges
 
 
@@ -118,7 +119,7 @@ def annotate_cfg(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, de
     OD = s1["OD"].astype(np.float32)
     w = precision(OD, s1["ok"], s1["bg"], sig2)
     t1 = time.time()
-    net, info = build_network(dbg, OD.shape)
+    net, info = build_network(dbg, OD.shape, continuity=cfg.continuity)
     if cfg.coarse and cfg.deep:
         from .coarse import deep_edges
         deep_edges(net, s1c)

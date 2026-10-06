@@ -1357,3 +1357,39 @@ controls 0.618) with the background leak on wide vessels as its first direction 
   0.789340 (-0.0032; fast 0.741328 +0.0337, probes 0.837353 -0.0402, empty probe 207 px false length);
   controls 0.561606 (empty false length 193 px). Discard: its crop gain comes with false vessels on empty
   backgrounds.
+
+## Batch 8: continuous vessels and a mask term (the user's two directions)
+
+**The directions.** (1) Disallow fragmented vessels: render continuous splines through bifurcations and
+crossings, as real (and vesselscene's) vessels are continuous; (2) improve structural identifiability with a
+binary-mask term, and keep the OD match. On the average-only evaluator (R2).
+
+**Recording first** (`continuity.py`, dev averages; truth strokes = observable edges chained through the
+straightest pair at each node, turn < 25 deg, as vesselscene's long vessels are tangent-continuous):
+- Fitted networks (healthy s000): a truth stroke of >= 40 px is covered by 3.6 edges (length-weighted), only
+  52 % by one edge; 25 edge ends stop inside the truth lumen far from any truth end (false ends); 5 nodes
+  leave two collinear ends of different edges unlinked.
+- Where a stroke passes from one edge to the next (proposal networks, 5 dev averages): mostly the network's
+  path leaves the stroke at a junction and another edge picks it up later (121 of 134 uncovered stretches:
+  neither edge ends there), then handovers between overlapping edges (54), parent-to-branch at a through node
+  (36: the network continued the other arm) and compound nodes where both edges end (28). True breaks
+  (false ends) are 14-29 per image.
+- Masks (healthy s000; truth observable lumen): a hysteresis mask on stage 1's cleaned OD / noise covers
+  0.974 of the lumen (0.981 in the junction discs, 0.981 on vessels of r >= 8 px; precision 0.62, the blur
+  flanks); stage 1's vesselness mask covers 0.861 (0.891 at junctions, 0.857 on wide vessels). The mask term
+  takes its mask from the OD, not from vesselness (the residual rule, section 2: vesselness distorts junctions).
+
+### E22: continuous vessels through gaps and across traces (pre-registered)
+
+**Hypothesis.** False ends inside lumens leave stretches unrendered and cut lumens square; linking the ends a
+vessel continues through makes the network closer to the generator's continuous vessels.
+**Change** (`proposals.build_network(continuity=True)`, `Config.continuity`): two free ends that point at each
+other across a gap <= max(12 px, 3 x calibre) (turn onto the bridge <= 35 deg, half widths within 2.5x, mean
+cleaned OD on the bridge >= 0.5 x the smaller end contrast) become one edge with a straight bridge and
+interpolated profiles; at a node, ends of different traces that continue each other (turn <= 25 deg, half
+widths within 2x) pass through it like same-trace ends. Proposal level (5 dev averages): false ends 102 -> 80,
+pieces per stroke down 0.0-0.24, 1-6 bridges and 0-3 cross-trace links per image.
+**Predicted** (small: few links): tier-1 crops centreline_f1 and edge_cover up, explained up slightly, pos and
+width unchanged, junction F1 unchanged (no junction is added or removed); composite +0.001 to +0.004; probes
+unchanged except possibly the end sweep (a bridge to an unrelated collinear line would be a false vessel);
+controls unchanged (no edge is added on an empty background). Steps (render vs vesselscene) down.
