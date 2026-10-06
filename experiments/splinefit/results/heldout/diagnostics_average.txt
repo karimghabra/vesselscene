@@ -1,0 +1,32 @@
+healthy_s001_480x768 average
+  junctions: 49/58 render < OD_obs, 40/58 render < own target, 50/58 target < OD_obs; mean target - OD_obs -0.0129, render - target -0.0026; worst [-0.09, -0.06, -0.05]
+  net bias (R - OD_obs)/OD_obs: discs -0.064, rest of band -0.073; target loss (target - OD_img)/OD_img: discs -0.054, rest -0.063
+  wide (r >= 8 px) OD held: render 0.918, target 0.937, vesselmap 0.942; missed OD on non-observable vessels 0.12
+  steps > 0.03 OD beyond OD_img's: 150; largest [(0.276, 56, 455), (0.25, 57, 454), (0.246, 58, 454)]; texture s.d. 0.0039
+healthy_s002_480x768 average
+  junctions: 114/118 render < OD_obs, 74/118 render < own target, 114/118 target < OD_obs; mean target - OD_obs -0.0448, render - target -0.0059; worst [-0.3, -0.24, -0.23]
+  net bias (R - OD_obs)/OD_obs: discs -0.251, rest of band -0.423; target loss (target - OD_img)/OD_img: discs -0.225, rest -0.368
+  wide (r >= 8 px) OD held: render 0.639, target 0.693, vesselmap 0.878; missed OD on non-observable vessels 0.18
+  steps > 0.03 OD beyond OD_img's: 87; largest [(0.119, 184, 436), (0.116, 184, 437), (0.115, 182, 435)]; texture s.d. 0.0034
+healthy_s003_480x768 average
+  junctions: 64/85 render < OD_obs, 47/85 render < own target, 64/85 target < OD_obs; mean target - OD_obs -0.0083, render - target -0.0006; worst [-0.04, -0.04, -0.03]
+  net bias (R - OD_obs)/OD_obs: discs -0.052, rest of band -0.049; target loss (target - OD_img)/OD_img: discs -0.047, rest -0.050
+  wide (r >= 8 px) OD held: render 0.958, target 0.964, vesselmap 0.943; missed OD on non-observable vessels 0.19
+  steps > 0.03 OD beyond OD_img's: 12; largest [(0.05, 653, 32), (0.05, 652, 32), (0.047, 653, 34)]; texture s.d. 0.0021
+healthy_s005_480x768 average
+  junctions: 63/79 render < OD_obs, 41/79 render < own target, 65/79 target < OD_obs; mean target - OD_obs -0.0095, render - target -0.0000; worst [-0.03, -0.03, -0.02]
+  net bias (R - OD_obs)/OD_obs: discs -0.045, rest of band -0.064; target loss (target - OD_img)/OD_img: discs -0.047, rest -0.056
+  wide (r >= 8 px) OD held: render 0.947, target 0.954, vesselmap 0.956; missed OD on non-observable vessels 0.13
+  steps > 0.03 OD beyond OD_img's: 32; largest [(0.074, 360, 25), (0.073, 360, 24), (0.069, 307, 50)]; texture s.d. 0.0023
+healthy_s006_480x768 average
+  junctions: 52/62 render < OD_obs, 34/62 render < own target, 50/62 target < OD_obs; mean target - OD_obs -0.0095, render - target -0.0014; worst [-0.05, -0.04, -0.04]
+  net bias (R - OD_obs)/OD_obs: discs -0.044, rest of band -0.032; target loss (target - OD_img)/OD_img: discs -0.036, rest -0.016
+  wide (r >= 8 px) OD held: render 0.958, target 0.979, vesselmap 0.898; missed OD on non-observable vessels 0.29
+  steps > 0.03 OD beyond OD_img's: 144; largest [(0.188, 154, 253), (0.185, 153, 254), (0.18, 153, 254)]; texture s.d. 0.0028
+pathologic_s001_480x768 average
+  junctions: 95/98 render < OD_obs, 67/98 render < own target, 96/98 target < OD_obs; mean target - OD_obs -0.0704, render - target -0.0071; worst [-0.47, -0.41, -0.3]
+  net bias (R - OD_obs)/OD_obs: discs -0.422, rest of band -0.520; target loss (target - OD_img)/OD_img: discs -0.388, rest -0.490
+  wide (r >= 8 px) OD held: render 0.512, target 0.558, vesselmap 0.771; missed OD on non-observable vessels 0.06
+  steps > 0.03 OD beyond OD_img's: 271; largest [(0.177, 658, 50), (0.176, 657, 50), (0.175, 659, 50)]; texture s.d. 0.0032
+  large-vessel half-max widths (OD_img, render) on rows 150/240/330: {150: (84, 77), 240: (75, 66), 330: (82, 68)}
+all: 437/500 junctions render < OD_obs, 303/500 render < own target, 439/500 target < OD_obs

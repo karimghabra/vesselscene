@@ -57,7 +57,8 @@ What this says:
   same pipeline with vesselmap's plain additive render) was run on the 10 development images during the
   write-up check. Against it, the fit is -0.0003 explained at junctions (higher on 4 of 10) and -0.0006
   composite (5 of 10). The lesion's widths are better on all 10 images. On the true network, the composition
-  adds at most +0.014 at junctions (dev `oracle_render` against `oracle_render_additive`). The junction gain
+  adds +0.014 at junctions on average, at most +0.043 on one image (dev `oracle_render` against
+  `oracle_render_additive`). The junction gain
   therefore comes from fitting profiles and positions jointly, with any render. A post-hoc lesion like this
   was never run by the loop: results/dev/lesion_additive/.
 - **The fit's remaining error still sits at junctions, as an under-prediction.** In the held-out figure
@@ -236,7 +237,7 @@ run_experiment JSON, each in a fresh process, and compares digests: tier 2's 'de
 compares two runs inside one process). vesselmap's torch.compile is off (`set_threads` sets
 VESSELMAP_COMPILE=0): its per-shape cache made an image's floats depend on the images run before it.
 `controls.py` re-renders six battery stimuli (empty average / frame, line_d3, line_d6_h0.25, fork_wide,
-cross_a45) with imaging seeds 1-7 and reports the mean probe_composite per stimulus: the battery uses ONE
+cross_a45; empty_frame dropped since R2) with imaging seeds 1-7 and reports the mean probe_composite per stimulus: the battery uses ONE
 imaging draw (seed 11), so a change that moves probes must also move these controls to count as real
 (`python -m experiments.splinefit.controls`, ~4 min).
 `tier2diag.py` breaks the whole-image residual down by true vessel-width class and per junction disc and

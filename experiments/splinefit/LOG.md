@@ -1298,3 +1298,53 @@ re-proposal all provisional, off).
    true vessel, effect on junction F1) and pre-register a gate.
 2. Width identifiability (blur as optics: a per-image PSF floor on s).
 3. Topology moves by fit comparison at event clusters (fork / crossing / T).
+
+## R2: only the averaged still is fitted (re-baseline)
+
+**The directive.** "We should only be fitting to the average frame" (the user, after the render comparison).
+A scene's single frame shows the same vessels as its averaged still at about 20x the noise variance; fitting
+it is out of scope. This changes the evaluator, so it is a logged re-baseline (program.md 3) in its own commit
+(5776d29), not an experiment.
+
+**The change (frozen files; hashes in frozen.json and program.md).**
+- `fastset.KINDS = ("average",)` is the one switch. The fast set takes PER_SCENE = 2 crops per dev scene on
+  the average (the best window, then the best one overlapping it by at most MAX_IOU); the first is the old
+  average crop, so 5 of the 10 crops are unchanged.
+- The probe battery scores its 30 average stimuli; the 4 frame stimuli (fork_thin_frame, cross_a45_frame,
+  capillary_frame, empty_frame) stay in the battery and its manifest, unscored.
+- Tier 2 runs the 5 dev averages; evaluate_fit and heldout_report tabulate the kinds in KINDS; the controls
+  drop empty_frame (diagnostic, not frozen). tests/test_loop.py gains `test_fast_set_fits_the_average_only`.
+
+**The loop's decisions, re-judged on the averages** (`rejudge_average.py`, results/dev/rejudge_average.txt).
+Every tier-1 run but E12's kept its per-crop and per-probe rows; each decision is replayed on its own A/B
+pair, on both kinds and on the night's 5 average crops plus the 30 average probes. Every replayed run matches
+its logged composite in results.tsv.
+- 3 tier-1 verdicts flip: E7 (+0.0011 both kinds, +0.0093 averages), E8 (-0.0056, +0.0069) and E13 (+0.0017,
+  +0.0050). E7 and E8 add stage-7 edges (average crops +0.022 / +0.017, frame crops -0.004 / -0.026); E13's
+  gain is one crop (pathologic +0.072) that the unchanged frames halved. Against E7, E8 is still a discard
+  (-0.0024). E12 (no JSON) stays a discard, bounded from its log at +0.0016 to +0.0019.
+- E11, E18 and E19 were logged differently from the bare rule for reasons that are not the image kind (E11
+  a correctness fix within 0.002; E18 and E19 vetoed by the controls); the same holds on the averages.
+- No tier-2 verdict changes under the final rule: E3 confirmed (+0.0085 on the averages, 5 of 5 scenes),
+  E10+E11 regressed (5 of 5 down), E6, E14, E20 and E20a provisional. No controls veto changes: on the 35
+  average-still control fits E14 0.584, E18 0.612 and E19 0.614 fall below E9's 0.618, and E20 is again a
+  hair below (0.61804 against 0.61810), the sub-noise fall waived in batch 6.
+
+**Re-baseline (R1 = E9 pipeline, unchanged).**
+- Tier 1 (5776d29): composite 0.792582, fast 0.707579, probes 0.877585 (graph 0.640521, pos 0.779846, width
+  0.758017, explained 0.786046); 280 s; digest 0783c0701f43a5a3.
+- Tier 2: composite 0.766486 (graph 0.701367, pos 0.802073, width 0.774042, explained 0.918701,
+  explained_junction 0.921326); 966 s; deterministic; digest 21cb3fd3c6e238b6. Every image is identical (same
+  digest) to R1's average row, as it must be.
+- Controls (average stimuli, seeds 1-7): 0.618099, the same as E9's average-still score from batch 4.
+
+**Re-tests** (`r2_variants.py`; the pipeline's `nm_verify=False` switch itself crashes since the batch-3
+reset, KeyError 'pa': stage 8 must run with zero rounds to fit the profiles, as E7 did).
+- E7 alone (stage-7 proposals, stage 8 with 0 prune rounds): tier 1 0.798682 (+0.0061; fast 0.723148
+  +0.0156, probes 0.874215 -0.0034); controls 0.619899 (+0.0018), empty false length 80.7 px, unchanged.
+  Tier 1 keep; controls pass. Tier 2: {{E7T2}}
+- V1 alone as the proposer (surround and association off, V1's own thresholds 3.5 / 2.0, stage 8 with 0
+  rounds; the held-out ablation of the neuromimetic study suggested it, so only dev evidence decides): tier 1
+  0.789340 (-0.0032; fast 0.741328 +0.0337, probes 0.837353 -0.0402, empty probe 207 px false length);
+  controls 0.561606 (empty false length 193 px). Discard: its crop gain comes with false vessels on empty
+  backgrounds.

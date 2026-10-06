@@ -84,10 +84,10 @@ Higher is better. Tier 2 (confirmation): every dev scene's average still, twice;
 composite; `deterministic: True` is required.
 
 **Only the averaged still is fitted (re-baseline R2, at the user's direction).** The single frame of a scene
-shows the same vessels at about 20x the noise; fitting it is out of scope. fastset.KINDS is the one switch:
-the fast crops, the scored probes, tier 2, the reference rows and the held-out tables all follow it. Re-judged
-on the averages alone, six tier-1 decisions of batches 1-6 flip (LOG.md, R2); no tier-2 verdict and no
-controls veto does.
+shows the same vessels at about 20x the noise variance; fitting it is out of scope. fastset.KINDS is the one
+switch: the fast crops, the scored probes, tier 2, the reference rows and the held-out tables all follow it.
+Re-judged on the averages alone, three tier-1 verdicts of batches 1-6 flip (E7, E8, E13; LOG.md, R2); no
+tier-2 verdict and no controls veto does.
 
 ## 5. The loop
 
