@@ -6,6 +6,8 @@ The full report of the two experiments in this folder:
 - [splinefit](splinefit/README.md): one spline network for the whole image, fitted jointly to the image's
   optical density, junctions included. The neuromimetic annotator proposes the network.
 
+[PIPELINE.md](PIPELINE.md) follows one image through every step, from pixels to the graph, with images.
+
 **Only the averaged still is fitted.** A vesselscene scene has an averaged still and a single frame of the
 same vessels; the frame carries about 20x the noise variance (4-6x its standard deviation). From re-baseline R2 on, only the average is fitted and
 scored, and every number here is for averaged stills: 6 held-out scenes, one image each. Both experiments
