@@ -1423,3 +1423,17 @@ and the longer edge then paid its MDL cost and survived the prune. Continuity he
 never lends length to a false one: a link must not lower the bar a piece has to clear. Config.continuity off.
 The larger fragmentation (paths that leave the truth stroke at junctions, 121 of 134 stretches) is untouched by
 E22; it needs the continuation chosen at the junctions themselves.
+
+**E23 result (tier 1, pipeline:annotate_mask): composite 0.787753 (-0.0048 against R2): DISCARD.** fast 0.705252
+(-0.0023, 1 of 5 scenes up), probes 0.870254 (-0.0073; width sweep 0.831 -> 0.799). Per crop: pos -0.011 (lower
+on 9 of 10), width +0.0045, graph -0.003, explained +0.001. Predictions: pos up NOT held (down everywhere);
+width up held (slightly); graph unchanged held.
+**E23b result (tier 1, pipeline:annotate_mask_first): composite 0.783882 (-0.0087): DISCARD.** fast 0.704483
+(-0.0031), probes 0.863280 (-0.0143); per crop graph +0.0079 but all of it on one crop (pathologic crop 1: type
+balance +0.25, junction F1 +0.09; the others -0.008 to +0.002), width -0.033 (lower on 8 of 10: with contrast
+and blur held, r absorbs the blurred footprint), pos -0.012 (9 of 10); blur guard worse on every scene.
+**Reading.** A binary mask is a lossy statistic of the same OD. Where the OD model fits (healthy dev crops:
+explained 0.98+ on whole images), the precision-weighted OD likelihood already locates the vessels better, and
+the mask term adds a coarser and partly mis-specified signal (neighbouring footprints merge in the mask, and a
+3 px coarse scale fattens them), which pulls the centrelines. The one place it helped (pathologic crop 1) is
+where the OD model is wrong (the target lost the wide vessels); that is the target's problem, not the fit's.

@@ -36,3 +36,10 @@ def _with(nm_cfg):
 
 annotate_e7 = _with(NM["E7"])
 annotate_v1own = _with(NM["V1OWN"])
+
+
+def annotate_mask_w01(image, valid):
+    """E23w (batch 8): the mask term at a tenth of E23's weight (dose-response check), continuity off."""
+    from experiments.splinefit import pipeline as P2
+    return P2.annotate_cfg(image, valid, replace(P2.DEFAULT, continuity=False,
+                                                 fit=replace(P2.DEFAULT.fit, mask_w=0.1)))
