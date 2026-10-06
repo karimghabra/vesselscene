@@ -1342,7 +1342,16 @@ its logged composite in results.tsv.
 reset, KeyError 'pa': stage 8 must run with zero rounds to fit the profiles, as E7 did).
 - E7 alone (stage-7 proposals, stage 8 with 0 prune rounds): tier 1 0.798682 (+0.0061; fast 0.723148
   +0.0156, probes 0.874215 -0.0034); controls 0.619899 (+0.0018), empty false length 80.7 px, unchanged.
-  Tier 1 keep; controls pass. Tier 2: {{E7T2}}
+  Tier 1 keep; controls pass. Tier 2 (5 dev averages x2): composite 0.761857 (graph 0.694317, pos 0.802959,
+  width 0.766433, explained 0.918798); 981 s; deterministic; digest 2f6e3d2904ca9774. Paired per scene against
+  the R2 re-baseline: -0.00463 +- 0.00249 (t -1.86), 2 up 3 down (s004 -0.010, pathologic -0.010, s008
+  -0.005); guards contrast_rel_err, |contrast_bias| and width_rel_err veto. PROVISIONAL, not confirmed: added
+  code, so not adopted. Like E10 in batch 3, the stage-7 graph's crop gain does not transfer to whole images.
+
+**What R2 changes.** The pipeline stays R1 (the E9 pipeline). Fitting only the averages changed three tier-1
+verdicts of the night but none of its confirmations, and the two average-motivated re-tests (E7, V1 alone) fail
+at tier 2 and at the controls. The next batch starts from the R2 baseline (tier 1 0.792582, tier 2 0.766486,
+controls 0.618) with the background leak on wide vessels as its first direction (REPORT.md section 8).
 - V1 alone as the proposer (surround and association off, V1's own thresholds 3.5 / 2.0, stage 8 with 0
   rounds; the held-out ablation of the neuromimetic study suggested it, so only dev evidence decides): tier 1
   0.789340 (-0.0032; fast 0.741328 +0.0337, probes 0.837353 -0.0402, empty probe 207 px false length);

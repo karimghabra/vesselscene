@@ -57,7 +57,8 @@ the held-out JSONs.
 - **The overnight loop (Karpathy's autoresearch)** ran 21 experiments on both image kinds and kept 4 changes
   plus a determinism fix. On the development averages tier 2 rose from 0.7578 to 0.7665, most of it from one
   idea: freeze the geometry before the target is re-cleaned. Re-judged on the averages alone, 3 of its tier-1
-  verdicts flip (E7, E8, E13); no tier-2 verdict and no controls veto changes. <!-- R2BOTTOM -->
+  verdicts flip (E7, E8, E13); no tier-2 verdict and no controls veto changes. Re-tested on the averages, E7
+  fails tier 2 and V1 alone as the proposer fails the controls, so the pipeline stays as it was.
 
 ## 1. The question, and the residual rule
 
@@ -439,7 +440,10 @@ each decision can be replayed on the night's 5 average crops (one per scene; R2'
 
 **Re-tests under the average-only evaluator** (R2 re-baseline, the unchanged E9 pipeline: tier 1 0.7926, tier 2
 0.7665, average-still controls 0.618):
-- **E7 alone** (stage-7 proposals) passes tier 1 (0.7987, +0.0061: crops +0.016, probes -0.003). <!-- E7T2 -->
+- **E7 alone** (stage-7 proposals) passes tier 1 (0.7987, +0.0061: crops +0.016, probes -0.003) and the
+  controls (0.620, no new false length), but not tier 2: on the 5 development averages it is -0.0046 per scene
+  (t -1.86, 3 of 5 down), and the contrast and width guards veto it. Not adopted; like E10, its crop gain does
+  not transfer to whole images.
 - **V1 alone as the proposer** (section 2's finding, at V1's own thresholds) fails tier 1 (0.7893, -0.0032).
   Its crops gain +0.034, but it draws a 207 px false vessel on the empty probe, and on the multi-seed controls
   it scores 0.562 with 193 px of false length on the empty backgrounds. Its held-out advantage of section 2
