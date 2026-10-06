@@ -449,6 +449,23 @@ each decision can be replayed on the night's 5 average crops (one per scene; R2'
   it scores 0.562 with 193 px of false length on the empty backgrounds. Its held-out advantage of section 2
   comes with false alarms that the held-out scores do not penalise.
 
+**Batch 8: continuous vessels and a mask term** (the user's two directions, on the average-only evaluator; LOG.md
+batch 8). Nothing was kept.
+- **Continuity.** Against vesselscene's continuous long vessels, a fitted network covers a true long vessel
+  with about 3 edges, mostly because the proposer's paths leave the vessel at a junction and another edge picks
+  it up (121 of 134 uncovered stretches on the development averages), not because of gaps. Bridging gaps and
+  continuing across traces (E22) raised the crops slightly (+0.001) but cost 0.003 on the probes: on a faint
+  line a link made two false texture pieces one edge that then survived the prune. Continuity has to come from
+  the tracing, with each original piece judged on its own evidence.
+- **Mask term.** Matching the render's soft-thresholded footprint to a hysteresis mask of the target OD lowers
+  positions on 9 of 10 crops (E23, -0.0048); fitting the geometry to the mask first lets the radius absorb the
+  blurred footprint (E23b, -0.0087); at a tenth of the weight it does nothing (E23w). A binary mask is a lossy
+  summary of the OD the fit already matches.
+- **What it found instead.** Stage 1's vesselness mask, whose negative the background is fitted on, holds 37 %
+  of the pathologic development scene's wide-vessel lumen; a hysteresis mask on the cleaned OD holds 66-71 %.
+  That is the background leak's mechanism, and the mask's better use: as the region the background is fitted
+  outside of (section 8, step 1).
+
 **Lessons:**
 - Where a cleaner target enters decides whether it helps.
 - On hard images the target, not the render, is the ceiling.
@@ -521,8 +538,9 @@ is the weakest score. It is lowest for thin vessels (diameter under 4 px), for c
 This is my ranking, given sections 5 and 6. The loop's own batch-7 ranking put deep edges first.
 
 1. **Fix the target's background leak** first: the background takes OD all along the band, most on wide,
-   low-contrast vessels, and at junctions too (sections 4 and 6). A vesselness mask that also covers wide
-   vessels applies the residual rule more thoroughly; the coarse channel (E18-E20) was a first attempt.
+   low-contrast vessels, and at junctions too (sections 4 and 6). Fit the background outside a vessel mask
+   made from the cleaned OD (hysteresis, pixel and coarse scales), which covers wide vessels far better than
+   stage 1's vesselness mask (batch 8); the coarse channel (E18-E20) was a first attempt.
 2. **Topology moves decided by fit comparison** at junction clusters: fork against crossing against T, and
    adding or dropping an arm. This is where graph, crossings and types are lost.
 3. **Deep edges with a pre-registered gate**, on more scenes with deep vessels.

@@ -1437,3 +1437,34 @@ explained 0.98+ on whole images), the precision-weighted OD likelihood already l
 the mask term adds a coarser and partly mis-specified signal (neighbouring footprints merge in the mask, and a
 3 px coarse scale fattens them), which pulls the centrelines. The one place it helped (pathologic crop 1) is
 where the OD model is wrong (the target lost the wide vessels); that is the target's problem, not the fit's.
+
+**E23w (dose-response, r2_variants:annotate_mask_w01, mask_w 0.1): composite 0.792795 (+0.0002): DISCARD** (within
+0.002, adds code). Crops -0.00005 (no scene moves by more than 5e-4 but s000 -0.0006), probes +0.0005. The mask
+term has no weight at which it helps: 1 -> -0.0048, 0.1 -> 0.0000, mask-first -> -0.0087.
+
+### Batch 8 summary
+
+| # | commit | change | tier-1 composite | fast | probes | status | prediction held? |
+|---|---|---|---|---|---|---|---|
+| E22 | 32247c8 | continuity: gap bridges + cross-trace continuation | 0.791730 | 0.708688 | 0.874772 | discard | crops yes, probes no |
+| E23 | 4f35978* | mask term (mask_w 1) with the OD match | 0.787753 | 0.705252 | 0.870254 | discard | no (pos down) |
+| E23b | 4f35978* | mask-only geometry stage, then OD + mask | 0.783882 | 0.704483 | 0.863280 | discard | no (width down) |
+| E23w | 4f35978* | mask term at weight 0.1 | 0.792795 | 0.707525 | 0.878065 | discard | null |
+
+R2 baseline: 0.792582 (fast 0.707579, probes 0.877585). Nothing kept; the pipeline stays R1.
+
+**What the batch taught.**
+1. The fitted networks are fragmented against vesselscene's continuous vessels (a truth stroke spans about 3
+   edges), but mostly because the proposer's paths leave a vessel at a junction and another edge picks it up,
+   not because of gaps. Linking pieces after the fact (E22) helps the crops a little and lends length to false
+   pieces, which then survive the prune. The scorer cuts every edge at junctions, so the choice of which arm
+   continues acts only through the render. Continuity has to be built into the tracing (the proposer), with a
+   prune that judges each original piece on its own evidence, not added to the network afterwards.
+2. A binary mask is a lossy statistic of the OD the fit already matches: as a loss term it pulls centrelines
+   (E23) or lets r absorb the blurred footprint (E23b), and at low weight it does nothing (E23w).
+3. The recording found the mechanism of the background leak instead: stage 1's vesselness mask, whose negative
+   the background is fitted on, holds 0.37 of the pathologic dev scene's wide-vessel lumen (0.46 overall),
+   against 0.66-0.71 for a hysteresis mask on the cleaned OD (0.70-0.99 overall on the dev averages). The mask
+   is the right tool, used for the background rather than as a fit target: the next experiment fits the
+   background outside an OD-derived vessel mask (the residual rule unchanged: B on the negative of a vessel
+   mask, the target the image's own OD).
