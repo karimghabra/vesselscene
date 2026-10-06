@@ -19,15 +19,15 @@
   },
   {
    "scene": "healthy_s000_480x768",
-   "kind": "frame",
+   "kind": "average",
    "crop": [
     128,
-    128,
+    160,
     256,
     256
    ],
-   "junctions": 25,
-   "lumen_px": 28752
+   "junctions": 24,
+   "lumen_px": 30507
   },
   {
    "scene": "healthy_s004_320x512",
@@ -43,15 +43,15 @@
   },
   {
    "scene": "healthy_s004_320x512",
-   "kind": "frame",
+   "kind": "average",
    "crop": [
     224,
     0,
     256,
     256
    ],
-   "junctions": 30,
-   "lumen_px": 41670
+   "junctions": 27,
+   "lumen_px": 42535
   },
   {
    "scene": "healthy_s007_480x768",
@@ -67,15 +67,15 @@
   },
   {
    "scene": "healthy_s007_480x768",
-   "kind": "frame",
+   "kind": "average",
    "crop": [
-    96,
-    192,
+    224,
+    128,
     256,
     256
    ],
-   "junctions": 20,
-   "lumen_px": 32826
+   "junctions": 18,
+   "lumen_px": 30330
   },
   {
    "scene": "healthy_s008_480x768",
@@ -91,15 +91,15 @@
   },
   {
    "scene": "healthy_s008_480x768",
-   "kind": "frame",
+   "kind": "average",
    "crop": [
-    96,
     128,
+    160,
     256,
     256
    ],
-   "junctions": 17,
-   "lumen_px": 27870
+   "junctions": 22,
+   "lumen_px": 27298
   },
   {
    "scene": "pathologic_s000_480x768",
@@ -115,15 +115,15 @@
   },
   {
    "scene": "pathologic_s000_480x768",
-   "kind": "frame",
+   "kind": "average",
    "crop": [
     352,
-    96,
+    224,
     256,
     256
    ],
-   "junctions": 12,
-   "lumen_px": 52205
+   "junctions": 11,
+   "lumen_px": 44312
   }
  ]
 }

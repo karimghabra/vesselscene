@@ -28,7 +28,7 @@ from . import probes as PR
 from .run_experiment import WORK, load_pipeline
 
 CONTROL_DIR = os.path.join(WORK, "controls")
-STIMULI = ("empty_average", "empty_frame", "line_d3", "line_d6_h0.25", "fork_wide", "cross_a45")
+STIMULI = ("empty_average", "line_d3", "line_d6_h0.25", "fork_wide", "cross_a45")   # averages only (R2)
 SEEDS = (1, 2, 3, 4, 5, 6, 7)
 
 

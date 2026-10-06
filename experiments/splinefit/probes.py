@@ -20,7 +20,9 @@ noise draw.  Blur is swept by moving the focus (focus_offset), not the vessel, s
 bypass of the contrast stays fixed; contrast by the haematocrit.  make_scene computes the observable truth
 (truth.py) and the image junctions (junctions.py) exactly as for the dev scenes, and save_scene writes the
 usual folder, so score.py scores a probe like any image (crop-free, the whole probe).  Each stimulus is one
-(geometry, kind): mostly the average still, a few frames (their red-cell gaps and 20x noise).
+(geometry, kind): mostly the average still, a few frames (their red-cell gaps and 20x noise).  Only the
+stimuli of the kinds the loop fits (fastset.KINDS: the average still, re-baseline R2) are run and scored; the
+frame stimuli stay in the battery and its manifest, unscored.
 
 The battery is FROZEN with the evaluator: ``generate()`` writes it once into PROBE_DIR (refusing to
 overwrite) with a manifest (battery.json: every stimulus's parameters and the sha256 of its image and truth
@@ -516,10 +518,11 @@ def run_probes(annotate=None, deadline: float | None = None, oracle: bool = Fals
     """The pipeline annotate(image, valid) on every probe (or the ORACLE): dict(probe_score, rows, tuning,
     digest, seconds).  deadline: a time.monotonic() value; past it the run raises TimeoutError (a crash)."""
     from experiments.splinefit import score as S
+    from experiments.splinefit.fastset import KINDS
     t_start = time.monotonic()
     rows, h = [], hashlib.sha256()
     for st in load_battery(probe_dir):
-        if only and st["sweep"] not in only and st["name"] not in only:
+        if st["kind"] not in KINDS or (only and st["sweep"] not in only and st["name"] not in only):
             continue
         if deadline is not None and time.monotonic() > deadline:
             raise TimeoutError(f"probe battery past the deadline at {st['name']}")

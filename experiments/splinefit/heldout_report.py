@@ -16,6 +16,8 @@ import os
 
 import numpy as np
 
+from .fastset import KINDS
+
 PARTS = [("composite", "composite"), ("graph_score", "graph"), ("pos", "pos"), ("width", "width"),
          ("explained", "explained"), ("explained_junction", "expl. junction"), ("centreline_f1", "line F1"),
          ("junction_f1_strict", "junc F1 strict"), ("junction_type_balanced_coarse", "coarse bal."),
@@ -50,7 +52,7 @@ def _fmt(v, key):
 
 def table(res: dict, scenes=None) -> str:
     out = []
-    for kind in ("average", "frame"):
+    for kind in KINDS:
         out.append(f"\n**{kind}**\n")
         out.append("| row | n | " + " | ".join(p[1] for p in PARTS) + " |")
         out.append("|---" * (len(PARTS) + 2) + "|")
@@ -66,7 +68,7 @@ def table(res: dict, scenes=None) -> str:
 def paired(res: dict, scenes=None) -> str:
     fit = {(r["scene"], r["kind"]): r for r in res["fit"]}
     out = []
-    for kinds, label in ((("average",), "average"), (("frame",), "frame"), (("average", "frame"), "both kinds")):
+    for kinds, label in [((k,), k) for k in KINDS]:
         out.append(f"\n**{label}: fit minus each row** (mean per-image difference; images where the fit is "
                    f"higher / tied / all)\n")
         out.append("| minus | " + " | ".join(p[1] for p in PAIRED) + " |")

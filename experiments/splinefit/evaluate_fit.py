@@ -4,7 +4,8 @@ r"""Reference rows of the fit scorer (score.py) on the dev images: what the fitt
         true_complete] [--pipeline [NAME=]module:function ...] [--oracle-fit [NAME=]module:function ...]
         [--out DIR] [--table-only]
 
-Rows (tier 2: every dev image, both kinds; tier 1: the fast crops; vesselmap only on tier 2):
+Rows (tier 2: every dev scene's average still, fastset.KINDS; tier 1: the fast crops; vesselmap only on
+tier 2):
 
   proposals        the neuromimetic annotator alone (experiments.neuromimetic.neuromimetic.run, stages 1-8) as
                    a network: its edges (cut at every junction) with the profiles of its fit_profiles (a
@@ -238,8 +239,9 @@ def write_table(out_dir: str) -> str:
 
 def table(res: dict) -> str:
     """Markdown: per kind, the mean of each TABLE score per row (n images in brackets)."""
+    from .fastset import KINDS
     out = []
-    for kind in ("average", "frame"):
+    for kind in KINDS:
         out.append(f"\n**{kind}** (mean over images)\n")
         out.append("| row | n | " + " | ".join(TABLE) + " |")
         out.append("|---" * (len(TABLE) + 2) + "|")

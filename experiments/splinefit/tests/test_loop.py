@@ -15,3 +15,15 @@ def test_tier1_composite_is_half_crops_half_probes():
     s2 = RE.summarise(rows, None)
     assert abs(s2["composite"] - 0.7) < 1e-12 and "probe_score" not in s2
     assert RE.summarise(rows, dict(probe_score=0.9, digest="q"))["digest"] != s["digest"]
+
+
+def test_fast_set_fits_the_average_only():
+    """Re-baseline R2: the loop fits and scores the averaged still only, two crops per dev scene."""
+    from experiments.splinefit import fastset as FS
+    crops = FS.load()
+    assert FS.KINDS == ("average",) and all(c["kind"] == "average" for c in crops)
+    per = {}
+    for c in crops:
+        per.setdefault(c["scene"], []).append(c["crop"])
+    assert all(len(v) == FS.PER_SCENE for v in per.values())
+    assert all(FS._iou(a, b) <= FS.MAX_IOU for v in per.values() for i, a in enumerate(v) for b in v[i + 1:])

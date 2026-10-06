@@ -1,13 +1,14 @@
 r"""The fast tier: a fixed set of 256 x 256 px crops of the dev images (fastset.json), chosen once from the truth.
 
-One crop per (dev scene, kind): for each scene, every window on a 32 px grid (plus the windows flush with the
-right and bottom borders) that is at least MIN_VALID valid is ranked by the number of observable junctions of
-that kind's truth at least score.CROP_BORDER_PX inside it (the junctions the crop scores), ties broken by the
-observable lumen area inside it, then by (y0, x0).  The average takes the best window; the frame the best one
-overlapping the average's by at most MAX_IOU (intersection over union), so the two kinds of a scene show
-different places.  Scenes are the dev folders in sorted order, so the set is deterministic; it is written
-once to fastset.json (scene folder name, kind, crop = [x0, y0, w, h], the junction count) and then frozen
-with the scorer.  The fast-tier score is the mean composite over the crops (run_experiment.py).
+Only the averaged still is fitted (KINDS; re-baseline R2: the single frame is out of scope).  PER_SCENE crops
+per dev scene: every window on a 32 px grid (plus the windows flush with the right and bottom borders) that is
+at least MIN_VALID valid is ranked by the number of observable junctions of the average's truth at least
+score.CROP_BORDER_PX inside it (the junctions the crop scores), ties broken by the observable lumen area
+inside it, then by (y0, x0).  The first crop is the best window; each next one the best window overlapping
+every crop already chosen by at most MAX_IOU (intersection over union), so a scene's crops show different
+places.  Scenes are the dev folders in sorted order, so the set is deterministic; it is written once to
+fastset.json (scene folder name, kind, crop = [x0, y0, w, h], the junction count) and then frozen with the
+scorer.  The fast-tier score is the mean composite over the crops (run_experiment.py).
 
     python -m experiments.splinefit.fastset [--dev DIR] [--write]
 
@@ -25,7 +26,8 @@ CROP = 256
 STRIDE = 32
 MIN_VALID = 0.97
 MAX_IOU = 0.25
-KINDS = ("average", "frame")
+KINDS = ("average",)          # the image kinds the loop fits and scores (the frame is not fitted)
+PER_SCENE = 2
 HERE = os.path.dirname(os.path.abspath(__file__))
 FASTSET_JSON = os.path.join(HERE, "fastset.json")
 DEV_DIR = os.environ.get("SPLINEFIT_DEV", "/tmp/claude-0/-home-user-vesselscene/8df61651-ad5a-5e7a-847b-43ea09c109c3/"
@@ -90,18 +92,17 @@ def select(dev: str = DEV_DIR) -> list:
     rows = []
     for folder in dev_scenes(dev):
         name = os.path.basename(folder)
-        chosen = None
         for kind in KINDS:
             ranked = rank_windows(folder, kind)
-            pick = ranked[0]
-            if chosen is not None:
-                for cand in ranked:
-                    if _iou((cand[3], cand[2], CROP, CROP), chosen) <= MAX_IOU:
-                        pick = cand
-                        break
-            crop = [pick[3], pick[2], CROP, CROP]
-            chosen = chosen or crop
-            rows.append(dict(scene=name, kind=kind, crop=crop, junctions=pick[0], lumen_px=pick[1]))
+            chosen = []
+            for _ in range(PER_SCENE):
+                pick = next((c for c in ranked if all(_iou((c[3], c[2], CROP, CROP), b) <= MAX_IOU
+                                                      for b in chosen)), None)
+                if pick is None:
+                    break
+                crop = [pick[3], pick[2], CROP, CROP]
+                chosen.append(crop)
+                rows.append(dict(scene=name, kind=kind, crop=crop, junctions=pick[0], lumen_px=pick[1]))
     return rows
 
 

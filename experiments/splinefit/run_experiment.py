@@ -13,8 +13,9 @@ value), then the fast crops of fastset.json, each run once.  The tier-1 score is
 
     composite = 0.5 * fast_composite (mean composite over the crops) + 0.5 * probe_score.
 
-Tier 2 (the confirmation tier, limit --limit, default TIER2_LIMIT_S): every dev image (fastset.dev_scenes,
-both kinds), each run --repeat times (default 2); the digests must agree (deterministic).  Its composite is
+Tier 2 (the confirmation tier, limit --limit, default TIER2_LIMIT_S): every dev scene's image of each kind
+in fastset.KINDS (the average still only, re-baseline R2), each run --repeat times (default 2); the digests
+must agree (deterministic).  Its composite is
 the mean composite over the images (no probes).
 
 Each run calls ``annotate(image, valid)`` (score.py's pipeline contract) with copies of the image (or crop)

@@ -44,17 +44,17 @@ commit; check them with `python -m experiments.splinefit.check_frozen` (exit 1 o
 | file (experiments/splinefit/) | git blob hash | role |
 |---|---|---|
 | `score.py` | `165399683b7cae171ceef0de904c3623d1ff87ab` | the metric (graph, geometry, render, composite) |
-| `run_experiment.py` | `e36f7e9f53dc35e11fadd77718a4b9c0cb142b35` | one experiment, tier 1 / tier 2 (prints the metric) |
-| `probes.py` | `b58c61739ab4c91eb3432981c11ea859b8fe0a96` | the psychophysics battery: stimuli, scoring, tuning curves |
+| `run_experiment.py` | `ae22eab136cbbb05442e328af104b16d8cef8638` | one experiment, tier 1 / tier 2 (prints the metric) |
+| `probes.py` | `2faf9531068a2640a6dcbecd901df00144a75fbf` | the psychophysics battery: stimuli, scoring, tuning curves |
 | `probe_battery.json` | `50897efcaae300e2563d112bd7cdf49caa31480b` | the battery's manifest (sha256 of every probe image and truth) |
-| `fastset.py` | `6b610f0186ad4bfbcf93539bdc9fa2bec34fcf74` | selection of the fast crops |
-| `fastset.json` | `888a1bc7e80cad79e29387985db08926510706e2` | the 10 fast crops |
-| `evaluate_fit.py` | `7e0a01dbed84c070b13c14c46fa55e09a5404960` | reference rows and tables |
+| `fastset.py` | `67f734dacf9e75c66e6eaced0f372690453f4ede` | selection of the fast crops |
+| `fastset.json` | `255875564f0fc271d5bd7e2fb35a11a32bb6be53` | the 10 fast crops (2 per dev scene, average) |
+| `evaluate_fit.py` | `072f5cde7cf7d67f6847da78203555da6fa13640` | reference rows and tables |
 | `oracle.py` | `4e433437f4a11e477551dcf6037201d28785a68e` | ORACLE diagnostics (positive control, render ceiling) |
 | `check_frozen.py` | `eaf43664cd4cadf389ed54d50dfabb36c7ded144` | this check |
 | `tests/test_score.py` | `9fda445f6f78015dd70921730f69b387b0612fbc` | the scorer's known answers |
 | `tests/test_probes.py` | `0e202d9d66ee42559ee4372e549a2f1253ef363d` | the probe helpers' known answers |
-| `tests/test_loop.py` | `5e857a95c4011cfcad7770db310339f5bbdc993e` | the tier-1 arithmetic |
+| `tests/test_loop.py` | `18068575dee49cb954cf63efc9f51f08f888d851` | the tier-1 arithmetic |
 | dev set (5 scenes, every file) | `b9f9795b33357754` (sha256 digest, check_frozen) | the scenes the tiers read |
 
 Also frozen: the dev set (`$SPLINEFIT_DEV`, the scratchpad's `scenes/dev/`: healthy_s000, healthy_s004,
@@ -70,8 +70,9 @@ files (except a documented real bug fix) or the `vesselscene/` package.
 `run_experiment` prints, grep-able:
 
 - tier 1 (the loop's tier): `composite = 0.5 * fast_composite + 0.5 * probe_score`;
-  `fast_composite` = mean `score.composite` over the 10 fast crops of fastset.json (256 x 256 px, one per dev
-  scene and kind); `probe_score` = mean `probe_composite` over the 34-stimulus probe battery;
+  `fast_composite` = mean `score.composite` over the 10 fast crops of fastset.json (256 x 256 px, two per dev
+  scene, on the average still); `probe_score` = mean `probe_composite` over the battery's 30 average-still
+  stimuli (its 4 frame stimuli are not scored);
 - `score.composite = 0.5 * graph_score + 0.5 * mean(pos, width, explained)`, where graph_score =
   mean(centreline_f1, junction_f1_strict, junction_type_balanced_coarse, edge_cover), pos = 1 - min(1,
   offset_px / 3), width = 1 - min(1, |r_fit - r_true| / r_true), explained = 1 - SSR / SS of the render
@@ -79,8 +80,14 @@ files (except a documented real bug fix) or the `vesselscene/` package.
 - also every part (`graph`, `pos`, `width`, `explained`, `explained_junction`), the probe thresholds
   (`probe_<sweep>: X`) and sweep means (`probe_mean_<sweep>: X`), `seconds` and `digest`.
 
-Higher is better. Tier 2 (confirmation): every dev image, both kinds, twice; composite = mean image
+Higher is better. Tier 2 (confirmation): every dev scene's average still, twice; composite = mean image
 composite; `deterministic: True` is required.
+
+**Only the averaged still is fitted (re-baseline R2, at the user's direction).** The single frame of a scene
+shows the same vessels at about 20x the noise; fitting it is out of scope. fastset.KINDS is the one switch:
+the fast crops, the scored probes, tier 2, the reference rows and the held-out tables all follow it. Re-judged
+on the averages alone, six tier-1 decisions of batches 1-6 flip (LOG.md, R2); no tier-2 verdict and no
+controls veto does.
 
 ## 5. The loop
 
@@ -113,8 +120,8 @@ the tail of results.tsv. Find the last kept commit (the last `keep` row) and the
    and look at the residuals at junctions and crossings; note what changed in LOG.md.
 9. Every ~4 kept experiments, and at the end of each batch: **tier 2**
    (`python -m experiments.splinefit.run_experiment --tier 2 --repeat 2 > run2.log 2>&1`, ~30 min, run in the
-   background while you think). Compare it PAIRED, **per scene** (batch 7, review: the average and the frame
-   of a scene share their vessels, so the unit is the scene, n = 5, not the image), with the last confirmed
+   background while you think). Compare it PAIRED, **per scene** (batch 7, review: the unit is the scene,
+   n = 5; since R2 a scene has one image, its average), with the last confirmed
    run (`python -m experiments.splinefit.paired <last confirmed tier2.json> <new tier2.json>`); it prints a
    verdict:
    - **confirmed**: mean > 2 SE over scenes, no scene below -5e-4, and no GUARD vetoed; log a `confirm` row;
@@ -170,9 +177,9 @@ NOTES_neuromimetic.md and LIMBUS vesselmap's fit.py, combine near-misses, or try
   from the residual, not from the original image.
 - **Psychophysics.** The probe battery (probes.py) is a frozen set of canonical stimuli with parametric
   sweeps (vessel width, blur, contrast; Y-forks; X-crossing angle, depth gap, unequal widths; T and pseudo-T;
-  parallel pairs at shrinking gaps; ends; red-cell gaps in a frame; empty backgrounds). Read the tuning
-  curves and thresholds (`probe_<sweep>`), not only the score: a change should move the thresholds it
-  targets and leave the others.
+  parallel pairs at shrinking gaps; ends; red-cell gaps in a frame, unscored since R2; empty backgrounds).
+  Read the tuning curves and thresholds (`probe_<sweep>`), not only the score: a change should move the
+  thresholds it targets and leave the others.
 - **Lesions and controls.** Change one variable at a time. Positive control: the oracle init
   (`python -m experiments.splinefit.evaluate_fit --rows --oracle-fit experiments.splinefit.oracle:fit`), the
   fit started from the true network; a fitter that is right keeps the truth's geometry. Negative control:
