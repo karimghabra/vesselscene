@@ -248,6 +248,65 @@ compound (690, 46) is the same vessel near the top, where the target kept it. Mo
 fit under-predicts at junctions (net junction bias -0.42 on this image).*
 <!-- /FEATURED -->
 
+### vesselscene's render vs the fitted render
+
+vesselscene renders each scene's vessels itself before it adds the background and camera noise: OD_img, the
+clean vessel OD through the image formation's blur. The fit is trying to reproduce exactly this, so the two
+renders can be compared directly. The scorer's `explained_true` measures it: 1 - sum (OD_img - R)^2 /
+sum OD_img^2 over the vessel band.
+- On healthy 1, 3, 5 and 6, where the fit's target is faithful, the fitted render explains 0.979–0.990 of
+  vesselscene's render, and 0.978–0.993 at junctions.
+- On healthy 2 it explains 0.83–0.85 (0.87–0.90 at junctions), and on pathologic 1, 0.73 (0.76–0.77).
+
+What the comparison shows:
+- **Wide, low-contrast vessels are missing on the two hard images.**
+  - Each pixel carrying truth OD (OD_img > 0.03) was assigned the radius of its nearest truth centreline
+    sample. This attribution is rough where vessels overlap.
+  - On vessels of radius 8 px or more, the fit renders 92–96 % of vesselscene's OD on the eight good images,
+    61–64 % on healthy 2, and 51 % on pathologic 1.
+  - The loss is in the target, not the fit. The fit's own target keeps 67–69 % of that OD on healthy 2 and
+    56 % on pathologic 1, against 92–98 % on the good images. The background took the rest, and the render
+    comes within 6 points of its target, so no fit of that target can bring those vessels back.
+  - The image does contain them. vesselmap, which fits its own background, explains 0.96–0.98 of
+    vesselscene's render on healthy 2 and 0.88–0.95 on pathologic 1.
+  - They count against the fit: of all the OD the fit misses, only 6–32 % lies on vessels the truth marks
+    non-observable.
+- **Faint beaded capillaries are not rendered.** The fitted network has no edges on them.
+- **Texture inside wide vessels stays.** vesselscene draws granular texture inside the large vessels. A
+  smooth tube cannot reproduce it, so it remains as fine red–blue speckle in the difference.
+- **An edge that ends inside a vessel ends square.** Where the large vessel's fitted centreline breaks into
+  short pieces, the render steps across the vessel. In healthy 3 frame, near (390, 217), the step is 0.04 OD
+  between neighbouring pixels. A fresh re-render of the exported network keeps such steps (checked on three
+  images), so they come from the broken geometry, not from a stale render. They are few and local.
+
+![healthy 3 frame, vesselscene's render vs the fitted render](splinefit/results/heldout/figures/annotated/healthy_s003_480x768_frame_vs_truth.jpg)
+
+*Healthy 3 frame: the fitted render explains 0.985 of vesselscene's. The vessels the proposer traced are
+reproduced closely, junctions included. The differences are faint:*
+- *the beaded capillaries at the top left, never traced;*
+- *diffuse red at the top right, where many faint vessels overlap;*
+- *the granular texture inside the large vessel (the speckle along it);*
+- *a step near (390, 217), where the large vessel's centreline breaks and an edge ends square.*
+
+![healthy 3 frame, junction close-ups of both renders](splinefit/results/heldout/figures/annotated/healthy_s003_480x768_frame_vs_truth_junctions.jpg)
+
+*The same windows as the junction close-ups above. At 72 px the fitted render matches vesselscene's at every
+junction type. What differs is texture inside the vessels and a slight, mostly red under-prediction.*
+
+![healthy 2 frame, vesselscene's render vs the fitted render](splinefit/results/heldout/figures/annotated/healthy_s002_480x768_frame_vs_truth.jpg)
+
+*Healthy 2 frame: explains 0.825. Two wide vessels of moderate contrast are absent from the fitted render:
+one runs diagonally across the left half, the other is at the bottom right. Both are about 0.15–0.3 OD,
+against 0.55 for the main vessel. The thin vessels match well.*
+
+![pathologic 1 average, vesselscene's render vs the fitted render](splinefit/results/heldout/figures/annotated/pathologic_s001_480x768_average_vs_truth.jpg)
+
+*Pathologic 1 average: explains 0.729. The wide, low-contrast vessels crossing the field and the lower part
+of the large vessel at the right are missing from the fitted render. The fit draws the large vessel narrower and
+lumpy, so both its flanks are red and its bulges blue.*
+
+All 12 images can be compared interactively with a wipe between the two renders (section 9, `viewer`).
+
 ### Every held-out image
 
 <!-- PERIMAGE -->
@@ -382,7 +441,8 @@ for thin vessels (diameter under 4 px), for crossings at 30-45° and for 1 px ga
 This is my ranking, given section 6. The loop's own batch-7 ranking put deep edges first.
 
 1. **Fix the target at junctions** first. A background mask that keeps junction regions applies the
-   residual rule more thoroughly, and it is the direct test of section 6.
+   residual rule more thoroughly, and it is the direct test of section 6. The render comparison in section 4
+   adds wide, low-contrast vessels to what the target loses.
 2. **Topology moves decided by fit comparison** at junction clusters: fork against crossing against T, and
    adding or dropping an arm. This is where graph, crossings and types are lost.
 3. **Deep edges with a pre-registered gate**, on more scenes with deep vessels.
@@ -398,5 +458,6 @@ python -m experiments.splinefit.evaluate_fit --tier 2 --rows proposals vesselmap
 python -m experiments.splinefit.heldout_report --fit fit.json --reference ref/ --out experiments/splinefit/results/heldout
 python -m experiments.splinefit.report_figures run  <scene> <kind> ...                       # annotated scenes
 python -m experiments.splinefit.report_figures plot <scene> <kind> ... --out experiments/splinefit/results/heldout/figures/annotated
+python -m experiments.splinefit.report_figures viewer <scene> <kind> ... --out render_vs_fit.html  # the wipe viewer
 python -m experiments.splinefit.report_html experiments/REPORT.md report.html                # this page, self-contained
 ```
