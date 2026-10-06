@@ -1393,3 +1393,23 @@ pieces per stroke down 0.0-0.24, 1-6 bridges and 0-3 cross-trace links per image
 width unchanged, junction F1 unchanged (no junction is added or removed); composite +0.001 to +0.004; probes
 unchanged except possibly the end sweep (a bridge to an unrelated collinear line would be a false vessel);
 controls unchanged (no edge is added on an empty background). Steps (render vs vesselscene) down.
+
+### E23 / E23b: a binary-mask term with the OD match (pre-registered)
+
+**Hypothesis.** The OD likelihood is dominated by the wide dark vessels; a binary vessel mask weighs a thin
+faint vessel's footprint like a wide one's and is insensitive to contrast scale, so it pins where vessels are
+and how far their (blurred) profiles reach: structural identifiability for positions, widths and the prune.
+**Change** (`render.JunctionModel.set_mask` / `mask_term`, FitConfig.mask_*; default off): the target's mask is
+a hysteresis on the target OD in noise units (seeds > 3, grown > 1.5), at the pixel scale and after a 3 px
+Gaussian (wide faint vessels), united; the render passes through the same threshold softly
+(sigmoid((z - 1.5) / 0.5), both scales united), and mask_w x the summed binary cross-entropy over the valid
+pixels joins the loss in every stage (the mask is re-made from the re-cleaned target after the retarget).
+The mask comes from the image's own cleaned OD, never from vesselness (the residual rule).
+- E23 (`pipeline:annotate_mask`): mask_w = 1, continuity off (one variable against the R2 baseline).
+- E23b (`pipeline:annotate_mask_first`): the same, plus a mask-only geometry stage (60 iterations, OD term
+  off, centrelines and r free, contrast and blur held) between the profile stage and the joint fit: geometry
+  from the mask, then the OD match.
+**Predicted.** pos up and width up slightly (thin vessels' footprints count), graph unchanged in E23 (the prune
+reads the OD gains) and possibly changed in E23b (it prunes a moved geometry), explained slightly down or
+unchanged (the mask term trades OD fit), probes: thin and faint lines up, empty unchanged; composite 0 to
++0.005. Smoke test (pathologic s000 crop 1): E23 -0.0035, E23b +0.046 (graph +0.087): one crop, not evidence.

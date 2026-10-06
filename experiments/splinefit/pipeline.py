@@ -198,6 +198,17 @@ def annotate(image, valid):
     return annotate_cfg(image, valid, DEFAULT)
 
 
+def annotate_mask(image, valid):
+    """E23 (batch 8): the binary-mask term on top of the OD match (FitConfig.mask_w = 1), continuity off."""
+    return annotate_cfg(image, valid, replace(DEFAULT, continuity=False, fit=replace(DEFAULT.fit, mask_w=1.0)))
+
+
+def annotate_mask_first(image, valid):
+    """E23b (batch 8): a mask-only geometry stage (60 iterations) before the OD match, the mask term kept on."""
+    return annotate_cfg(image, valid, replace(DEFAULT, continuity=False,
+                                              fit=replace(DEFAULT.fit, mask_w=1.0, mask_first=60)))
+
+
 def annotate_additive(image, valid):
     """Lesion: the same pipeline with vesselmap's plain additive render (no union at nodes, kappa = 1)."""
     return annotate_cfg(image, valid, replace(DEFAULT, fit=replace(DEFAULT.fit, junctions=False)))

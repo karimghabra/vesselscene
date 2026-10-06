@@ -88,6 +88,14 @@ class FitConfig:
     bg_thr: float = 0.5             # x local noise sigma: render support
     bg_dil: int = 3                 # px
     bg_sigma: float = 16.0          # px, masked normalised convolution of the re-fitted background
+    mask_w: float = 0.0             # E23 (batch 8): weight of the binary-mask term (render.JunctionModel.set_mask);
+                                    # 0 = off
+    mask_hi: float = 3.0            # ... hysteresis seeds (target OD in noise units)
+    mask_lo: float = 1.5            # ... grown region, and the render's soft threshold
+    mask_tau: float = 0.5           # ... softness of the render's threshold (noise units)
+    mask_coarse: float = 3.0        # px, the coarse scale (wide, faint vessels)
+    mask_first: int = 0             # E23b: iterations of a mask-only geometry stage (OD term off; centrelines and r
+                                    # free, contrast and blur held) after the profile stage; 0 = none
 
 
 def precision(OD: np.ndarray, ok: np.ndarray, bgmask: np.ndarray, sig2: np.ndarray | None = None) -> np.ndarray:
@@ -110,16 +118,19 @@ def make_model(net: VesselNetwork, OD: np.ndarray, w: np.ndarray, cfg: FitConfig
     if net.background is None:
         net.background, net.bg_spacing = _zero_grid(OD.shape, cfg.bg_spacing), cfg.bg_spacing
     net.meta.setdefault("optics", dict(halo_weight=cfg.halo0[0], halo_sigma=cfg.halo0[1]))
-    return JunctionModel(net, -OD.astype(np.float32), w, stride=1, bg_spacing=cfg.bg_spacing,
-                         ref=net if anchored else None, fit_background=cfg.fit_background,
-                         junctions=cfg.junctions, kappa=cfg.kappa0 if kappa is None else kappa)
+    model = JunctionModel(net, -OD.astype(np.float32), w, stride=1, bg_spacing=cfg.bg_spacing,
+                          ref=net if anchored else None, fit_background=cfg.fit_background,
+                          junctions=cfg.junctions, kappa=cfg.kappa0 if kappa is None else kappa)
+    model.set_mask(cfg.mask_w, cfg.mask_hi, cfg.mask_lo, cfg.mask_tau, cfg.mask_coarse)
+    return model
 
 
 def priors(cfg: FitConfig) -> dict:
     return dict(lam_bend=cfg.lam_bend, lam_prof=cfg.lam_prof, lam_bg=cfg.lam_bg, lam_calibre=cfg.lam_calibre)
 
 
-def optimize(model: JunctionModel, iters: int, cfg: FitConfig, fit_pos=True, anchored=False, log=None):
+def optimize(model: JunctionModel, iters: int, cfg: FitConfig, fit_pos=True, anchored=False, log=None,
+             freeze=()):
     """Adam with a cosine-decayed learning rate (vesselmap.fit.optimize), fixed iteration count."""
     if iters <= 0 or not model.eids:
         return []
@@ -145,6 +156,8 @@ def optimize(model: JunctionModel, iters: int, cfg: FitConfig, fit_pos=True, anc
         if not fit_pos:
             model.node_xy.grad = None
             model.inner.grad = None
+        for name in freeze:                            # E23b: e.g. ("raw_a", "raw_s") in the mask-only stage
+            getattr(model, name).grad = None
         opt.step()
         model.project()
         hist.append((float(loss.detach()), float(nll.detach())))
@@ -285,6 +298,12 @@ def fit_network(net: VesselNetwork, OD: np.ndarray, w: np.ndarray, cfg: FitConfi
     optimize(model, cfg.iters_prof, cfg, fit_pos=False, anchored=True, log=log)
     model.write_back()
     kappa = float(model.kappa().detach())
+    if cfg.mask_first > 0 and cfg.mask_w > 0:          # E23b: geometry from the mask alone, then the OD match
+        model = make_model(net, OD, w, cfg, kappa, anchored=True)
+        model.nll_scale = 0.0
+        optimize(model, cfg.mask_first, cfg, fit_pos=cfg.fit_pos, anchored=True, log=log,
+                 freeze=("raw_a", "raw_s"))
+        model.write_back()
     for rnd in range(cfg.prune_rounds):
         model = make_model(net, OD, w, cfg, kappa, anchored=True)
         optimize(model, cfg.iters_joint, cfg, fit_pos=cfg.fit_pos, anchored=True, log=log)

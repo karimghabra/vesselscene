@@ -83,6 +83,59 @@ class JunctionModel(NetworkModel):
     def kappa(self):
         return torch.sigmoid(self.raw_kappa)
 
+    # ------------------------------------------------------------ mask term (E23, batch 8)
+    @torch.no_grad()
+    def set_mask(self, weight_w: float, hi: float = 3.0, lo: float = 1.5, tau: float = 0.5, coarse: float = 3.0):
+        """The binary-mask term: the target's vessel mask (hysteresis on the target OD in noise units, seeds >
+        hi, grown > lo; at the pixel scale and after a `coarse` px Gaussian, united) against the render passed
+        through the same threshold softly, sigmoid((z - lo) / tau) at both scales. The mask comes from the
+        image's own cleaned OD, never from vesselness (the residual rule). Added to the loss as weight_w x the
+        summed binary cross-entropy over the valid pixels."""
+        from scipy import ndimage as ndi
+        self.mask_w = float(weight_w)
+        if self.mask_w <= 0:
+            return
+        OD = (-self.logI).numpy().astype(np.float32)
+        w = self.weight.numpy()
+        ok = w > 0
+        sig_px = np.where(ok, 1.0 / np.sqrt(np.maximum(w, 1e-12)), np.inf)
+
+        def hyst(z):
+            lab, _ = ndi.label((z > lo) & ok)
+            keep = np.unique(lab[(z > hi) & ok])
+            return np.isin(lab, keep[keep > 0])
+
+        Mf = hyst(OD / sig_px)
+        Ac = ndi.gaussian_filter(OD, coarse)
+        hp = Ac - ndi.gaussian_filter(Ac, 3.0 * coarse)
+        bgv = hp[ok & ~Mf] if (ok & ~Mf).any() else hp[ok]
+        sig_c = float(1.4826 * np.median(np.abs(bgv - np.median(bgv))) + 1e-6)
+        Mc = hyst(Ac / sig_c)
+        self._mask_obs = torch.tensor((Mf | Mc) & ok, dtype=torch.float32)
+        self._mask_ok = torch.tensor(ok)
+        self._mask_inv_sig = torch.tensor(np.where(ok, 1.0 / sig_px, 0.0), dtype=torch.float32)
+        self._mask_inv_sig_c = 1.0 / sig_c
+        self._mask_par = (lo, tau, coarse)
+
+    def mask_term(self, R):
+        lo, tau, coarse = self._mask_par
+        mf = torch.sigmoid((R * self._mask_inv_sig - lo) / tau)
+        mc = torch.sigmoid((gaussian_blur(R, coarse) * self._mask_inv_sig_c - lo) / tau)
+        m = (1 - (1 - mf) * (1 - mc)).clamp(1e-6, 1 - 1e-6)
+        M, ok = self._mask_obs, self._mask_ok
+        bce = -(M * torch.log(m) + (1 - M) * torch.log(1 - m))
+        return self.mask_w * bce[ok].sum()
+
+    def loss(self, track=None, priors=None):
+        total, nll, entries, pred = super().loss(track=track, priors=priors)
+        scale = getattr(self, "nll_scale", 1.0)        # E23b: 0 in the mask-only geometry stage
+        if scale != 1.0:
+            total = total - (1.0 - scale) * nll
+        if getattr(self, "mask_w", 0.0) > 0:
+            R = (self.background() - pred).view(self.H, self.W)
+            total = total + self.mask_term(R)
+        return total, nll, entries, pred
+
     # ------------------------------------------------------------ sites
     def rebuild(self):
         super().rebuild()
