@@ -393,24 +393,43 @@ def _polar(ax, th, curves, title):
     ax.set_title(title, fontsize=9)
 
 
+def _blob_pixel(ctx):
+    """A background pixel (no vessel OD in the truth, >= 8 px from the vessel mask) whose fine-channel response
+    is the most orientation-blind: the largest isotropic part (mean of the lower half over orientation) among
+    those that reach the tracing threshold t_low at their best orientation."""
+    from scipy import ndimage as ndi
+    U = np.clip(ctx["U3"][0], 0, None)
+    far = ndi.distance_transform_edt(~ctx["s1"]["mask"]) >= 8
+    bgm = far & (ctx["case"]["od_img"] < 0.003) & ctx["s1"]["ok"]
+    bgm[:24], bgm[-24:], bgm[:, :24], bgm[:, -24:] = False, False, False, False
+    iso = np.sort(U, 0)[: U.shape[0] // 2].mean(0)
+    score = np.where(bgm & (U.max(0) > ctx["cfg"].t_low), iso, -1)
+    y, x = np.unravel_index(np.argmax(score), score.shape)
+    return int(x), int(y)
+
+
 def fig_step4(ctx, out, px):
     plt = _plt()
     th = N.orientations(ctx["cfg"])
-    fig = plt.figure(figsize=(15, 4.8), layout="constrained")
-    gs = fig.add_gridspec(1, 3)
-    for c, key in enumerate(("texture", "vessel", "crossing")):
+    px = dict(px, blob=_blob_pixel(ctx))
+    names = dict(blob="blob-like background texture", texture="line-like background texture", vessel="on a vessel",
+                 crossing="at a crossing")
+    fig = plt.figure(figsize=(19, 5.2), layout="constrained")
+    gs = fig.add_gridspec(1, 4)
+    for c, key in enumerate(("blob", "texture", "vessel", "crossing")):
         x, y = px[key]
         ax = fig.add_subplot(gs[0, c], projection="polar")
         v3, v4 = ctx["U3"][0][:, y, x], ctx["U4"][0][:, y, x]
         _polar(ax, th, [(v3, "#888888", "step 3: simple cells", "-"), (v4, "#d62728", "step 4: after the surround", "-")],
-               f"{dict(texture='background texture', vessel='on a vessel', crossing='at a crossing')[key]} ({x}, {y}): "
-               f"peak {np.max(v3):.1f} -> {np.max(v4):.1f}")
+               f"{names[key]} ({x}, {y})\nbest orientation {np.max(v3):.1f} -> {np.max(v4):.1f}")
         if c == 0:
-            ax.legend(fontsize=8, frameon=False, loc="upper left", bbox_to_anchor=(-0.3, 1.12))
-    fig.suptitle("Step 4, how it works: the same three pixels' tuning curves (fine channel) before and after the "
-                 "surround. A blob-like response (all orientations) is cut by its isotropic part; a line's peak keeps "
-                 "most of its height", fontsize=12, x=0.01, ha="left")
+            ax.legend(fontsize=8, frameon=False, loc="upper left", bbox_to_anchor=(-0.3, 1.18))
+    fig.suptitle("Step 4, how it works: tuning curves (fine channel) before and after the surround. The part of the "
+                 "response that is the same at every orientation is subtracted:\nit removes most of a blob's response "
+                 "and little of a line's, but a crossing (two orientations) also loses part of its response",
+                 fontsize=12, x=0.01, ha="left")
     _save(fig, out, "mech4_surround.jpg")
+    return px
 
 
 def _along(ctx, ci, t):
@@ -479,10 +498,11 @@ def fig_step5(ctx, out):
     ax.set_xlabel("px along the vessel")
     ax.set_ylabel("response (contrast-to-noise units)")
     ax.legend(fontsize=8, frameon=False, loc="upper right")
-    ax.set_title("along the vessel: weak stretches between strong neighbours are lifted; isolated ones are not",
-                 fontsize=9, loc="left")
+    ax.set_title("along the vessel: each pixel is averaged with its collinear neighbours: dips between strong "
+                 "stretches rise, peaks fall", fontsize=9, loc="left")
     fig.suptitle("Step 5, how it works: a pixel is supported only when there is line evidence both ahead of it and "
-                 "behind it, in its own orientation (bipole = sqrt(A+ x A-))", fontsize=12, x=0.01, ha="left")
+                 "behind it in its own orientation (bipole = sqrt(A+ x A-)); three steps of C = (U + bipole(C)) / 2",
+                 fontsize=12, x=0.01, ha="left")
     _save(fig, out, "mech5_association.jpg")
 
 
