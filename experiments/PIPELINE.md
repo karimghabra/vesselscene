@@ -862,6 +862,14 @@ fitted graph, the scene's own render, the fitted render, and their difference, 6
    *Red: true vessel area the mask misses, which the background absorbs. Green: covered. Grey: mask on the
    blurred edges of vessels.*
 
+   **Tested through the full fit (experiment E24): not an improvement as built.** The target keeps 82 % of
+   the true vessel OD instead of 72 %, but the OD mask also takes the dark half of the background texture.
+   The background, fitted on the brighter rest, sits about 0.002 OD too high, and the fit turns that offset
+   into darker, blurrier vessels. Added only at the retarget, the composite rose by 0.0025 (3 scenes up, none
+   down), but the contrast and blur error guards vetoed it. Used for the target from the start it scored
+   0.013 lower, and in the proposer 0.032 lower. The mask needs a criterion that separates vessels from
+   texture: a line-like one (the orientation score of steps 3-5, or the traced lumens), not OD amplitude alone.
+
 2. **Search for side branches along every traced vessel** (steps 6-7). Only 38 % of 3-way junctions are found,
    against 73-74 % of crossings and compounds. Step 7 makes a 3-way only when a trace ends on its parent within
    reach, so the junction is lost whenever the branch's trace stops short, never reaches the parent, or is

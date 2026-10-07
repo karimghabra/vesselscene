@@ -542,7 +542,10 @@ This is my ranking, given sections 5 and 6. The loop's own batch-7 ranking put d
 1. **Fix the target's background leak** first: the background takes OD all along the band, most on wide,
    low-contrast vessels, and at junctions too (sections 4 and 6). Fit the background outside a vessel mask
    made from the cleaned OD (hysteresis, pixel and coarse scales), which covers wide vessels far better than
-   stage 1's vesselness mask (batch 8); the coarse channel (E18-E20) was a first attempt.
+   stage 1's vesselness mask (batch 8); the coarse channel (E18-E20) was a first attempt. Batch 9 (E24) ran
+   that mask through the full fit: it also takes the dark half of the background texture, biases B up by
+   ~0.002 OD, and the fit turns the offset into darker, blurrier vessels (retarget only +0.0025, guards veto;
+   from the start -0.013; in the proposer -0.032). The mask needs a line-like criterion, not OD amplitude alone.
 2. **Topology moves decided by fit comparison** at junction clusters: fork against crossing against T, and
    adding or dropping an arm. This is where graph, crossings and types are lost.
 3. **Deep edges with a pre-registered gate**, on more scenes with deep vessels.
