@@ -39,6 +39,7 @@ table { border-collapse: collapse; font-size: 0.86em; font-variant-numeric: tabu
 th, td { border: 1px solid var(--rule); padding: 4px 8px; text-align: left; white-space: nowrap; }
 th { background: var(--head); }
 td:first-child, th:first-child { white-space: normal; min-width: 9em; }
+td:last-child, th:last-child { white-space: normal; min-width: 12em; }
 figure { margin: 1em 0 0.4em; }
 figure img { display: block; width: 100%; height: auto; border-radius: 4px; background: #fff; }
 p.caption, p > em:only-child { color: var(--cap); }

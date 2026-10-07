@@ -1,398 +1,844 @@
-# From image to graph: every manipulation, step by step, with images
+# How the vessel annotator works: from image to graph, step by step
 
-This report follows one image through the whole pipeline, from pixels to the exported graph, and shows what
-every step produces. It is meant as a recipe to re-implement by hand: each step gives the operation, its
-formula and parameters, a figure of its output, and what to look for in the figure. The last section lists
-what to change, with the evidence for each change.
+This report explains how the annotator turns one image of vessels into a graph. A graph here is a set of vessel
+centrelines (edges) that meet at junctions (nodes). It is written for someone who wants to understand every
+step well enough to implement it by hand.
 
-**The image** is a development scene, healthy 7, averaged still, 480 x 768 px. Development scenes were used
-for tuning, so its scores are better than on held-out images; [REPORT.md](REPORT.md) has the held-out numbers.
-Each figure shows the full frame and, below or beside it, a 192 px zoom (the yellow box). The zoom is the
-window with the most kinds of truth junction: 15 junctions, 7 of them crossings, 4 three-way and 4 compound.
+The annotator has two parts:
 
-**How the figures were made.** `python -m experiments.splinefit.pipeline_figures` calls the pipeline's own
-functions in order, with the default parameters. It checks that its stages 1-6 give the same 207 merged
-traces as `neuromimetic.propose`. The truth is read only to choose the zoom, in step 13, and in the last
-section.
+- **Part 1 (steps 1-8) proposes a graph.** It uses fixed filters modelled on the early visual system: retina,
+  then primary visual cortex (V1). The result is a first guess of where the vessels and junctions are.
+- **Part 2 (steps 9-13) fits a drawing to the image.** The proposed graph becomes a set of smooth curves, each
+  with a width and a darkness. Those curves are drawn ("rendered") into an image, and the curves are adjusted
+  until the drawing matches the photograph as closely as possible. The adjusted curves are the output.
 
-| step | model | manipulation | output |
+Every step below has the same parts:
+
+- **Goal:** the problem it solves.
+- **Idea:** the intuition, with the biology where there is one.
+- **Algorithm:** code-like steps, faithful to the code, with every number.
+- **Settings:** what each number controls.
+- **How it works:** a figure that follows real pixels through the step.
+- **On the whole image:** the step's output for the whole example image.
+- **What to watch for:** where it goes wrong.
+
+**The example image** is a development scene, healthy 7: the averaged still, 480 x 768 pixels. Development
+scenes were used for tuning, so this image scores better than unseen ones ([REPORT.md](REPORT.md) has the
+held-out numbers). In the whole-image figures, the top row is the full frame and the bottom row is a 192-pixel
+zoom (the yellow box), chosen as the window with the most kinds of true junction.
+
+**The figures are made by** `pipeline_figures.py` (whole image) and `pipeline_mechanisms.py` (how it works).
+Both call the pipeline's own functions in its own order. In two places the "how it works" figures restate a
+few lines of code so they can be drawn: the tracing step (step 6) and the junction events (step 7). Step 7's
+restatement is checked against the pipeline: it finds every junction the pipeline finds, at the same place.
+The truth (the scene generator's own graph) is used only to place figures and to score the result.
+
+## Words used in this report
+
+| term | meaning |
+|---|---|
+| pixel, px | one image sample; distances are in pixels |
+| blur, G_s * X | a Gaussian blur of image X with width (standard deviation) s pixels |
+| log, ln | the natural logarithm |
+| optical density (OD) | how much light the blood absorbs at a pixel: OD = B - ln I. A vessel is a dip in brightness, so its OD is positive. Two overlapping vessels add their ODs (the Beer-Lambert law) |
+| background (B) | a smooth estimate of what ln I would be without vessels |
+| vessel mask (M) | pixels judged to be vessel. They are left out when the background is fitted |
+| noise level, RMS | the typical size of the random fluctuations near a pixel, measured on background pixels. RMS = root mean square, the square root of the average squared value |
+| robust | computed with medians, so a few extreme values (such as vessels) do not distort it |
+| contrast-to-noise ratio (CNR) | a response divided by the noise level. A value of 3 is three times the typical fluctuation |
+| orientation, theta | the direction a vessel runs, from 0 to 180 degrees, in 16 steps of 11.25 degrees (x to the right, y down) |
+| orientation score U(x, y, theta) | how strongly the image looks like a line through pixel (x, y) running at orientation theta |
+| tuning curve | one pixel's response at each of the 16 orientations |
+| channel | a group of filter sizes: fine (1.5-3 px), medium (4.2-6 px), coarse (8.5-24 px) |
+| ridge top (candidate) | a pixel whose response is higher than its neighbours on both sides across the line |
+| trace | a polyline followed along a ridge, one point per pixel |
+| junction | where vessels meet. Types: **3-way** (three arms), **crossing** (two vessels passing over each other: four arms in two straight pairs), **compound** (anything more complex) |
+| arm | a vessel leaving a junction |
+| edge | a vessel stretch from junction to junction (or to a free end) |
+| free end | an edge end that is not at a junction |
+| render, R | an image drawn from the graph: what the graph predicts the OD to be |
+| residual | target minus render: what the graph does not yet explain |
+| precision weight w | 1 / noise variance. Pixels in quiet areas count more than pixels in textured areas |
+| minimum description length (MDL) | keep a part of the model only if the error it removes is worth more than the cost of describing it |
+| B-spline, control points | a smooth curve defined by a few control points that it follows without passing through them |
+| gradient descent, Adam | improve parameters in small steps, each step downhill on the error. Adam is a common variant that adapts each parameter's step size |
+
+## Overview
+
+| step | biological model | what it does | output |
 |---|---|---|---|
-| 1 | photoreceptors, horizontal cells | log; background fitted outside a vessel mask | OD map (the fit's target) |
-| 2 | OFF-centre ganglion cells | difference of Gaussians per band, over the local RMS | CNR map Z |
-| 3 | V1 simple cells | even / odd oriented filter pairs, 16 orientations x 9 scales in 3 channels | orientation score U(x, y, theta) |
-| 4 | non-classical surround | subtract the isotropic part and the weaker flank | texture suppressed |
-| 5 | association field | bipole diffusion along the orientation | gaps completed: C(x, y, theta) |
-| 6 | readout | non-maximum suppression, hysteresis tracing in (x, y, theta), channel merge, widths | traces |
-| 7 | end-stopped cells | T and X events, clustered into typed junctions; traces cut at them | graph |
-| 8 | render, compare, prune | blurred-box profiles, additive render, MDL and visibility tests | pruned graph |
-| 9 | spline network | chains through crossings and through-nodes become B-splines | initial network |
-| 10 | render model | cylinder chord, blur, union at nodes, kappa at crossings, halo | differentiable render |
-| 11 | loss | precision-weighted squared residual plus priors | one scalar |
-| 12 | fit schedule | profiles, everything, prune, retarget, profiles | fitted network |
-| 13 | export | edges cut at nodes, typed junctions, crossings | the graph |
+| 1 | photoreceptors and horizontal cells | log of the image; a background fitted outside a vessel mask | the OD (the fit's target) |
+| 2 | OFF-centre ganglion cells | centre-minus-surround responses at 6 sizes, over the local noise | contrast-to-noise map Z |
+| 3 | V1 simple cells | line and edge filters at 16 orientations and 9 sizes | orientation score U |
+| 4 | the non-classical surround | subtracts what is the same at every orientation, and the weaker flank | U with blobs suppressed |
+| 5 | horizontal connections (association field) | supports a pixel when it is collinear with line evidence on both sides | completed score C |
+| 6 | readout | follows each ridge of C, one pixel at a time, in its own orientation | traces |
+| 7 | end-stopped cells | where traces end on or cross each other: typed junctions | the graph |
+| 8 | render, compare, prune | draws the graph, removes edges that do not pay for themselves | pruned graph |
+| 9 | (spline network) | one smooth curve per vessel, through crossings | the curves to fit |
+| 10 | (render model) | draws each curve as a blurred cylinder; fixes forks and crossings | the drawing R |
+| 11 | (loss) | weighted squared difference between OD and R, plus smoothness | one number to minimise |
+| 12 | (fit schedule) | adjusts everything in stages; removes edges; recleans the target | the fitted curves |
+| 13 | (export) | cuts curves at nodes; types junctions | the output graph |
 
-## Steps 1-8: proposing the graph
+The target of the fit is always the OD of step 1. The contrast-to-noise map Z of step 2 is never fitted.
+It only decides which pixels count as background (step 1) and whether an edge is visible (step 8).
 
-### Step 1. Optical density and the background
+# Part 1. Proposing a graph
 
-**Input:** the averaged still I and its valid-pixel map (inside the aperture, not saturated).
+## Step 1. Optical density and the background
 
-1. Take the log: `L = ln I`. Fill invalid pixels from the nearest valid pixel.
-2. Make a provisional background `B0`: a grey closing of L with a disc of radius 60 px, wider than any vessel.
-   The closing fills every dark structure narrower than the disc from its surround. It runs on a grid
-   downsampled 4x and is smoothed afterwards.
-3. Repeat twice:
-   - `OD = B - L`;
-   - vessel mask M = (band CNR Z > 2, step 2) or (OD smoothed at 1 px > 3 x its local RMS), dilated by 2 px;
-   - refit B on the pixels outside M only, by masked normalised convolution:
-     `B = G_8 * (L w) / G_8 * w`, with `w = valid and not M` and a Gaussian of sigma 8 px. Holes are filled
-     from coarser scales.
-4. **Output:** `OD = B - L` in nepers. Vessels are positive. By Beer-Lambert, overlapping vessels add their
-   densities.
+**Goal.** Turn brightness into a quantity where vessels are positive bumps on a flat zero, and where
+overlapping vessels add up.
 
-This is your residual rule. The fit's target is the OD cleaned by a background fitted on the mask's
-negative. It is never the mask, and never a vesselness map.
+**Idea.** Blood absorbs light, so a vessel darkens the image by a factor. On a log scale that factor becomes a
+subtraction: `ln I = B - OD`. To get the OD you need B, the brightness the background would have without the
+vessel. B is estimated from the pixels around each vessel and interpolated across it. Photoreceptors respond
+roughly to the log of intensity, and horizontal cells subtract the local average around each point. This step
+does both.
+
+**Algorithm.**
+
+```
+# Inputs: I (the averaged still), valid (pixels with data)
+ok = valid & (I > 0) & (I < 4095)                  # empty or saturated pixels are not data
+L  = ln(I) on ok pixels; elsewhere copy L from the nearest ok pixel
+
+# A first guess of the background: an "upper envelope" that fills every dark line narrower than 60 px
+B = upper_envelope(L, radius=60)
+OD = B - L
+S  = blur(OD, 1)
+bg = ok & (S < median(S) + 2 * robust_sd(S))       # first guess of the background pixels
+
+repeat 2 times:
+    Z     = band_cnr(OD, bg)                       # step 2: contrast-to-noise, max over 6 sizes
+    S     = blur(OD, 1)
+    noise = local_rms(S - median(S[bg]), bg, window=48)
+    M     = (Z > 2) | (S > 3 * noise)              # the vessel mask
+    M     = dilate(M, disc of radius 2 px)
+    bg    = ok & ~M                                # the background pixels: the mask's negative
+    B     = masked_mean(L, bg, sigma=8)            # B fitted on background pixels only
+    OD    = B - L
+OD on not-ok pixels = OD of the nearest ok pixel
+```
+
+The helpers:
+
+```
+upper_envelope(L, radius):
+    small = average L over 4 x 4 blocks                        # a grid 4x smaller, for speed
+    small = grey_closing(small, disc of radius radius / 4)     # max-filter, then min-filter: dark lines
+                                                               # narrower than the disc are filled in
+    small = blur(small, radius / 8)
+    return small resized back to full size (bilinear)
+
+masked_mean(X, w, sigma):          # "normalised convolution": the local mean of X over the pixels where w = 1
+    num = 0; den = 0
+    for k in 0, 1, 2, 3:           # a wider window fills holes the narrow one cannot reach
+        num += 0.03^k * blur(X * w, sigma * 2^k)
+        den += 0.03^k * blur(w,     sigma * 2^k)
+    g = mean of X over w;  eps = 0.03^4
+    return (num + eps * g) / (den + eps)
+
+robust_sd(x) = 1.4826 * median(|x - median(x)|)       # the standard deviation, from the median
+
+local_rms(D, bg, window):          # the typical size of D near each pixel, measured on background pixels
+    g = 1.4826 * median(|D| over bg)
+    Q = min(D^2, (3 g)^2)                              # cap outliers at 3 g
+    return sqrt(max(masked_mean(Q, bg, window), (0.05 g)^2))
+```
+
+**Settings.**
+
+| setting | value | what it controls |
+|---|---|---|
+| closing radius | 60 px | the widest dark structure the first guess fills in |
+| mask threshold | Z > 2, or OD > 3 x noise | what counts as vessel |
+| mask dilation | 2 px | margin around the mask, so vessel edges do not leak into B |
+| background sigma | 8 px | how locally B follows the illumination |
+| iterations | 2 | mask, then refit B, then mask again |
+
+**How it works.**
+
+![step 1 mechanism](splinefit/results/pipeline/mech1_background.jpg)
+
+*One line across the example image (yellow). Middle: the log brightness L (black) dips at each vessel. B0, the
+first guess (purple dashed), runs above the real background. B (blue) is fitted only outside the mask (orange
+spans), so it bridges each dip from the pixels beside it. Right: OD = B - L is the depth of each dip. It
+closely follows the scene generator's own clean vessel OD (green dotted, the truth). This OD is the target
+for the whole fit.*
+
+**On the whole image.**
 
 ![step 1](splinefit/results/pipeline/step1_background.jpg)
 
-*Top row: I, L and the provisional background B0. Bottom row: the mask M, the refitted background B and the
-OD. The zoom shows the thin vessels crossing below the wide one.*
+*Top: the image I, L = ln I, and the first guess B0. Bottom: the mask M, the refitted background B, and the
+OD.*
 
-**What to look for:**
-- B has no vessels in it: wherever M covers a vessel, B is interpolated from around it. The facets in B are
-  the edges of masked regions.
-- Where M misses part of a vessel, usually a faint or wide one, B dips into it and the OD loses that
-  vessel's density. This is the background leak; improvement 1 below shows how large it is.
+**What to watch for: the background leak.** B is only as good as the mask. Wherever the mask misses part of a
+vessel, B is fitted on the vessel itself, sags into it, and the OD loses that vessel's density. Faint and wide
+vessels are hit hardest, because their contrast-to-noise is low at every filter size.
 
-### Step 2. Contrast-to-noise per band
+![leak mechanism](splinefit/results/pipeline/mech_leak.jpg)
 
-For each band s in {1, 2, 4, 8, 16, 32} px:
-- take `D_s = G_s * OD - G_2s * OD`, an OFF-centre difference of Gaussians (a dark vessel in I is a bright
-  ridge of OD);
-- divide it by its robust local RMS over the background pixels: D_s squared, Winsorised at (3 x the global
-  robust RMS) squared, then a masked Gaussian mean with sigma = max(24, 4s) px.
+*The pathologic development scene, a line across a wide, faint vessel. The mask (orange) covers 20 % of this
+line's true lumen (green). B sags into the vessel (blue), and the target (red) keeps almost none of the
+vessel's true OD (green dotted). Fitting B outside a larger mask made from the OD itself (cyan dashed: 68 %
+of the lumen covered) recovers roughly half of it. Change 1 at the end of this report builds on this.*
 
-Then `Z = max over s of D_s / RMS_s`. Z feeds step 1's mask (Z > 2) and step 8's visibility test. The
-orientation stages filter the OD itself, not Z.
+## Step 2. Contrast against the local noise
+
+**Goal.** Measure how far each pixel stands out from its surroundings, in units of the local noise, at
+several sizes.
+
+**Idea.** An OFF-centre ganglion cell compares a small centre with a wider surround. Its gain is turned down
+where the scene is busy, so it reports contrast relative to the local noise. A thin vessel stands out at a
+small size, a wide vessel at a large size, so six sizes are used.
+
+**Algorithm.**
+
+```
+for s in (1, 2, 4, 8, 16, 32):                     # the six bands
+    D[s]   = blur(OD, s) - blur(OD, 2 s)           # centre minus a surround twice as wide
+    RMS[s] = local_rms(D[s], bg, window=max(24, 4 s))
+Z = max over s of D[s] / RMS[s]                    # the contrast-to-noise ratio of the best band
+```
+
+**Settings.** The bands (1-32 px) and the noise window (24 px, or 4 times the band if larger).
+
+**How it works.**
+
+![step 2 mechanism](splinefit/results/pipeline/mech2_cnr.jpg)
+
+*The same line as step 1. Left: the OD, its centre blur and its surround blur. Right: their difference D
+(green) against the noise band (grey) and twice the noise (dashed). Band 2 (top) picks out small-scale
+structure in and around the wide vessel; band 8 (bottom) sees its whole width.*
+
+**On the whole image.**
 
 ![step 2](splinefit/results/pipeline/step2_cnr.jpg)
 
-*The band s = 2 and its local RMS (top); the band s = 8 and Z (bottom).*
+*Band 2 and its local noise level (top); band 8 and the maximum over bands, Z (bottom).*
 
-**What to look for:** the RMS is high where the background is textured. Z is a contrast-to-noise ratio, so
-the same contrast counts for less there.
+**What to watch for.** The noise level is high where the background is textured, so the same vessel counts for
+less there. A wide vessel with a gentle profile has a low Z in every band: this is where the mask, and so the
+background, fails.
 
-### Step 3. Oriented filters: the simple cells
+## Step 3. Oriented line and edge filters: the simple cells
 
-**Orientations:** theta_k = k pi / 16, k = 0 ... 15. The tangent is t = (cos theta, sin theta), the normal
-is n.
+**Goal.** For every pixel and every orientation, measure how much the image looks like a line through that
+pixel at that orientation.
 
-**Filters:** at scale sigma, take an anisotropic Gaussian with std sigma across and e sigma along. e is 3,
-2.5 and 2 in the fine, medium and coarse channels.
-- even filter: `-sigma^2 d^2G/dn^2`, a centre-on line detector;
-- odd filter: `sigma dG/dn`, an edge detector.
+**Idea.** A V1 simple cell has an elongated receptive field. An even-symmetric cell (an excitatory stripe with
+inhibitory flanks) detects lines. An odd-symmetric cell (excitatory on one side, inhibitory on the other)
+detects edges. At a vessel's centre the line cell fires and the edge cell is silent. At a vessel's wall the
+edge cell fires strongly. Subtracting the edge response therefore keeps centres and rejects walls. Separate
+size channels keep a thin vessel crossing a wide one visible in the fine channel.
 
-Both are applied exactly by FFT with reflect padding, so the 16 orientations are equivalent.
+**Algorithm.**
 
-**Channels:**
+```
+for channel, (scales, grid factor f, elongation e) in:
+        fine:   (1.5, 2.1, 3.0 px;        f = 1; e = 3.0)
+        medium: (4.2, 6.0 px;             f = 2; e = 2.5)
+        coarse: (8.5, 12, 17, 24 px;      f = 4; e = 2.0):
+    X = OD averaged over f x f blocks;  bgc = background pixels on that grid
+    pad X by reflection, take its 2-D Fourier transform F
+    for each scale sigma (in grid pixels: sigma / f):
+        for k in 0 .. 15:  theta = k * 180 / 16 degrees
+            # wn, wt: spatial frequency across and along orientation theta
+            G      = exp(-0.5 * sigma^2 * (wn^2 + e^2 * wt^2))     # an elongated Gaussian (e x longer along)
+            even_k = inverse_FFT(F * sigma^2 * wn^2 * G)            # = -sigma^2 x 2nd derivative across
+            odd_k  = inverse_FFT(F * 1j * sigma * wn * G)           # = sigma x 1st derivative across
+        rms_even = local_rms of all 16 even responses together, over bgc, window max(24, 4 sigma)
+        rms_odd  = the same for the odd responses
+        z_k = even_k / rms_even - 0.7 * |odd_k| / rms_odd           # line evidence, in noise units
+    U[k] = max over the channel's scales of z_k;   S[k] = which scale won
+```
 
-| channel | scales (px) | grid |
+The filters are applied exactly in the frequency domain, so all 16 orientations are equally sharp.
+
+**Settings.**
+
+| setting | value | what it controls |
 |---|---|---|
-| fine | 1.5, 2.1, 3.0 | full |
-| medium | 4.2, 6.0 | downsampled 2x |
-| coarse | 8.5, 12, 17, 24 | downsampled 4x |
+| orientations | 16 (11.25 deg apart) | angular resolution |
+| scales | 1.5, 2.1, 3.0, 4.2, 6.0, 8.5, 12, 17, 24 px | the vessel widths it responds to |
+| elongation | 3, 2.5, 2 (fine, medium, coarse) | filter length along the vessel, in units of its width |
+| edge weight | 0.7 | how strongly wall echoes are rejected |
 
-**Normalisation:** each response is divided by the robust local RMS of its scale over the background,
-pooled over orientations. The kernel's noise gain cancels, so z is a CNR.
-
-**Line evidence:** `z = z_even - 0.7 |z_odd|`. This is phase gating. On a vessel's centre the odd response
-is zero by symmetry. On the wall of a wide vessel it is large, so wall echoes are rejected.
-
-**Per channel:** U(theta) is the max over the channel's scales, and S records which scale won.
+**How it works.**
 
 ![step 3 filters](splinefit/results/pipeline/step3_filters.jpg)
 
-*The filter pair at two scales and four of the 16 orientations: even (top) and odd (bottom).*
+*The filter pair at two sizes and four of the 16 orientations: line (even, top) and edge (odd, bottom). Red is
+positive, blue negative.*
 
-![step 3 orientation](splinefit/results/pipeline/step3_orientation.jpg)
+![step 3 mechanism](splinefit/results/pipeline/mech3_simple_cells.jpg)
 
-*The score per channel: the max over orientations, coloured by the winning orientation (key in the lower
-left of the first zoom).*
+*Left: responses along the line of step 1, at the wide vessel's orientation, for a small (2.1 px) and a medium
+(6 px) filter. The line cell (blue) is positive across the inside of the vessel. The edge cell (orange) is
+large at the walls and near zero at the centre. The line evidence (black) peaks at the centre and is strongly
+negative at the walls, so no trace can start on a wall. Right: tuning curves (radius = response at each
+orientation). On a vessel there is one lobe pointing along it. At a crossing there are two lobes, one per
+vessel. On background texture the response is weak (1.4).*
 
-**What to look for:**
-- At a crossing, each vessel keeps its own colour through the crossing point: two orientations are present
-  at one pixel. This is what lets step 6 trace straight through a crossing.
-- The fine channel sees the thin vessels crossing the wide one; the coarse channel sees only the wide ones.
-  That is why the channels are kept apart rather than taking one max over all scales.
+**On the whole image.**
 
-### Step 4. The surround: texture suppression
+![step 3](splinefit/results/pipeline/step3_orientation.jpg)
 
-Let `P = max(U, 0)`.
-1. **Isotropic part.** `iso` = the mean of the lower half of P over theta. A blob responds at every
-   orientation; a line responds at one, and a crossing at two. Set `U1 = U - 1.0 iso`.
-2. **Flanks.** The flank energy F_left and F_right is the mean of P_theta in a strip on each side of the
-   line, from d1 = 2.5 sigma + 1 to d1 + max(6, 1.5 sigma) px. Set `U2 = U1 - 0.3 min(F_left, F_right)`.
+*The best response over orientation per channel. Brightness is the response, full at 6; colour is the winning
+orientation (key in the lower left of the first zoom).*
 
-Only the weaker flank counts. Texture surrounds a pixel on both sides; a neighbouring vessel in a bundle is
-on one side only.
+**What to watch for.** A crossing gives two orientations at one pixel. This is what lets step 6 trace each
+vessel straight through, so anything that merges the two lobes loses the crossing.
 
-### Step 5. The association field: contour completion
+## Step 4. The surround: suppressing blobs and texture
 
-1. Pool P over neighbouring orientation layers: `max(P_k, 0.8 P_k+-1)`. This lets a contour turn by one
-   layer (co-circularity).
-2. Sum the two lobes, ahead and behind: `A+-_k(p) = sum_d w(d) P_k(p +- d t_k)`, with
-   `w(d) = exp(-d^2 / 2 l^2)`, `l = 8 sqrt(max(1, sigma / 2))` and d = 1 ... 3l. The lobes are spread
-   0.7 px sideways and normalised.
-3. Take the bipole `B_k = sqrt(A+_k A-_k)`. It needs support on both sides, so it fills a gap but does not
-   extend a line past its end.
-4. Run three steps of `C <- (U + B(C)) / 2`, starting from `C0 = max(U, 0)`.
+**Goal.** Remove responses that come from blobs and texture rather than lines.
 
-![steps 4 and 5](splinefit/results/pipeline/step45_context.jpg)
+**Idea.** A V1 cell's response is reduced by the activity of cells of all orientations at its location
+(cross-orientation suppression), and by cells of its own orientation beside it (surround suppression). A blob
+excites every orientation; a line excites one. Texture surrounds a pixel on both sides, while a neighbouring
+vessel lies on one side only, so only the weaker of the two flanks is subtracted.
 
-*Fine channel. Top: the score after steps 3, 4 and 5, full brightness at the seed threshold 3. Bottom: what
-step 6 will see: white above 3 (seeds), grey above 1.5 (where tracing may continue).*
+**Algorithm.**
 
-**What to look for:**
-- Step 4 removes the texture specks on the left of the frame.
-- Step 5 bridges the dips where two vessels cross (zoom) and continues faint vessels in grey.
+```
+P   = max(U, 0)
+iso = mean of the 8 smallest values of P over the 16 orientations      # per pixel: the orientation-blind part
+U1  = U - 1.0 * iso
+for each orientation k (tangent t, normal n), channel scale sigma:
+    d1 = 2.5 sigma + 1;   d2 = d1 + max(6, 1.5 sigma);   step = max(1, sigma / 2)
+    strip = the points d n + u t, for d from d1 to d2 in steps of `step`, u in {-1.5, -0.5, 0.5, 1.5} x step
+    F_left[k]  = mean of P[k] over the strip on one side      # each point spread over a Gaussian of
+                                                               # max(0.7, step / 2) px
+    F_right[k] = mean of P[k] over the strip on the other side
+    U2[k] = U1[k] - 0.3 * min(F_left[k], F_right[k])
+```
 
-### Step 6. Readout: tracing the vessels
+**Settings.** Cross-orientation weight 1.0; flank weight 0.3; flank strips from 2.5 sigma + 1 px out.
 
-**Per channel:**
-1. **Candidates.** A sample (theta_k, x, y) is a candidate if all of these hold:
-   - C_k is a local maximum along the normal (bilinear neighbours at +-1 px);
-   - C_k is at least its neighbours in theta (C_k >= C_k-1 and C_k > C_k+1);
-   - C_k > t_low = 1.5;
-   - it is at least 3 px from the frame and from invalid pixels.
-2. **Seeds.** Candidates above t_high = 3, strongest first.
-3. **Tracing.** From a seed, step 1 px along the tangent in both directions. The next sample is the best
-   candidate among positions 0 and +-1 px across the predicted one, in layers k and k+-1. Each candidate's
-   C is reduced by 15 % per px of lateral offset and 10 % per layer of turn. Further rules:
-   - look up to 3 px ahead to cross small gaps;
-   - pass through another trace's claimed pixels for at most 4 px (a shallow crossing);
-   - stop where nothing continues, or where the trace starts running along another trace (a T: the end is
-     put at the first contact).
-4. **Claims.** Every accepted sample claims +-max(1, 0.5 sigma) px across it, in layers k and k+-1, so a
-   lumen holds one trace.
-5. **Clean-up.** Drop traces shorter than 10 px; smooth the rest and resample at 1 px.
+**How it works.**
 
-**Merging channels.** Strongest first, drop a point where an accepted trace runs parallel (within one
-orientation bin of 11.25 deg) within 3 px. Keep the uncovered runs of at least 10 px. Here 217 fine, 138
-medium and 73 coarse traces merge into 207.
+![step 4 mechanism](splinefit/results/pipeline/mech4_surround.jpg)
 
-**Widths** come from the OD, not from a filter. Along each trace, sample the cross-section along the normal
-over +-max(6, 1.5 w0) px (at most 60), every 0.5 px. The baseline is the median of the outer fifth on each
-side. The width is the full width at half maximum, smoothed by a running median of 7 along the trace.
+*Tuning curves before (grey) and after (red) the surround. A blob-like texture pixel loses half its best
+response (2.7 to 1.4). A line-like texture pixel keeps it (1.4 to 1.4), but 1.4 is below the 1.5 a trace needs
+to continue. A vessel barely changes (13.5 to 13.0). A crossing loses 44 % (14.7 to 8.3): with two lobes, its
+"orientation-blind" part is large. That is a cost this step imposes on crossings.*
+
+## Step 5. The association field: completing lines
+
+**Goal.** Bridge short weak stretches of a vessel between strong ones, without extending lines past their
+ends.
+
+**Idea.** Horizontal connections in V1 link cells whose receptive fields are collinear. A "bipole" cell fires
+only when both of its lobes, ahead and behind along its orientation, are driven. So a gap between two line
+pieces is filled, but a line is not extended beyond its end, where only one lobe is driven.
+
+**Algorithm.**
+
+```
+l  = 8 * sqrt(max(1, sigma / 2))            # lobe length; fine channel: 8.2 px
+w(d) = exp(-d^2 / (2 l^2))  for d = 1, 2, ..., 3 l
+U0 = max(U2, 0);   C = U0
+repeat 3 times:
+    Pm[k] = max(C[k], 0.8 C[k-1], 0.8 C[k+1])                     # a contour may turn by one orientation step
+    ahead[k](p)  = sum_d w(d) Pm[k](p + d t_k) / sum_d w(d)        # weighted mean along the line, ahead
+    behind[k](p) = sum_d w(d) Pm[k](p - d t_k) / sum_d w(d)        # ... and behind
+    bipole[k] = sqrt(ahead[k] * behind[k])                         # needs support on BOTH sides
+    C = (U0 + bipole) / 2
+```
+
+**Settings.** Lobe length 8 px (scaled by the channel's size); 3 iterations; equal weight to the cell's own
+response and to its bipole support.
+
+**How it works.**
+
+![step 5 mechanism](splinefit/results/pipeline/mech5_association.jpg)
+
+*Left: one pixel's two lobes in one orientation (dot size = weight). Right: the response along a traced vessel
+before (grey) and after (red). Each pixel is averaged with its collinear support, so peaks fall and dips
+between strong stretches rise. At about 240 and 265 px the response is 1.40 and 1.42 before, below the 1.5 a
+trace needs to continue, so tracing would stop there. After, it is 2.06 and 2.29, and the trace runs through.*
+
+**On the whole image (steps 3 to 5).**
+
+![steps 3-5](splinefit/results/pipeline/step45_context.jpg)
+
+*Fine channel. Top: the score after steps 3, 4 and 5. Bottom: what the readout sees (white above the seed
+threshold 3, grey above the continuation threshold 1.5). Step 4 removes texture specks on the left; step 5
+bridges the dips at crossings in the zoom.*
+
+## Step 6. Readout: tracing the vessels
+
+**Goal.** Turn the score maps into polylines that follow each vessel's centre.
+
+**Idea.** A vessel is a ridge of C in its own orientation layer. Keep only ridge tops ("non-maximum
+suppression"), start traces at strong ridge tops, and continue them through weaker ones ("hysteresis": a high
+threshold to start, a lower one to continue). Because each vessel lives in its own orientation layer, two
+crossing vessels are two ridges that never touch, and a trace can follow its own ridge straight through the
+crossing.
+
+**Algorithm (per channel).**
+
+```
+# 1. Candidates: ridge tops
+candidate[k, y, x] = C[k](p) >= C[k](p + n_k)  and  C[k](p) > C[k](p - n_k)     # top across the line (+-1 px)
+                     and C[k] >= C[k-1] and C[k] > C[k+1]                         # top over orientation
+                     and C[k](p) > 1.5                                            # t_low
+                     and p at least 3 px inside the valid data
+
+# 2. Seeds: candidates above 3 (t_high), strongest first
+for each seed (k, y, x), strongest first:
+    if already claimed by a trace: skip
+    claim(k, y, x)
+    walk forward along t_k, then backward along -t_k; the trace is backward + seed + forward
+
+walk(k, y, x, direction d):
+    loop:
+        for step in 1, 2, 3:                                  # look up to 3 px ahead to cross small gaps
+            options = for dk in (0, -1, +1) (layer k + dk), for o in (0, -1, +1) (px across):
+                          position q = p + step * t_(k+dk) + o * n_(k+dk)   (t oriented along d)
+                          keep q if it is a candidate, ahead of p, and not claimed by this trace
+                          score = C[k+dk](q) * (1 - 0.15 |o|) * (1 - 0.1 |dk|)
+            if any options: take the best and stop looking further
+        if no option at any step: stop
+        if the chosen point is claimed by ANOTHER trace:
+            count it (it is not claimed); once more than 4 such points come in a row, drop all but the first
+            and stop                                                   # running along another trace = a T
+        else:
+            reset the count and claim it
+        move there; its layer becomes the new k
+
+claim(k, y, x):   # a trace owns its lumen, so no second trace starts inside a wide vessel
+    mark positions o * n_k for o in -h..h, with h = max(1, round(0.5 * the winning scale at p)),
+    in layers k-1, k, k+1
+
+# 3. Clean-up: drop traces with fewer than 3 points or shorter than 10 px; smooth (moving average of 5) and
+#    resample at 1 px. Each point keeps c = its C value and w = 2.5 x its winning scale.
+```
+
+**Merging the three channels.**
+
+```
+sort all traces by their mean C, strongest first
+for each trace:
+    a point is "covered" if an already accepted trace passes within 3 px of it at an orientation within one
+        step (11.25 deg), or if a trace from a COARSER channel covers it within 0.6 of that trace's width at
+        the same orientation (the wall echo of a wide vessel)
+    keep every uncovered run of at least 10 points as a new accepted trace
+```
+
+**Widths, from the OD (not from a filter).** For step 7, each trace's width is re-measured on the OD:
+
+```
+for every 2nd point of the trace:
+    profile = OD sampled along the normal, over +-max(6, 1.5 w) px (at most 60), every 0.5 px
+    baseline = mean of (median of the outer fifth on each side)
+    peak = max of the 5 central samples - baseline
+    width = distance between the half-peak crossings on each side
+smooth the widths with a running median of 7 along the trace
+```
+
+**Settings.**
+
+| setting | value | what it controls |
+|---|---|---|
+| t_high | 3 | the response needed to start a trace |
+| t_low | 1.5 | the response needed to continue one |
+| look-ahead | 3 px | the largest gap a trace jumps |
+| pass-through | 4 px | how long a trace may run inside another's claim (a shallow crossing) |
+| claim | 0.5 x scale (at least 1 px) | the lumen a trace owns |
+| minimum length | 10 px | shorter traces are dropped |
+
+**How it works.**
+
+![step 6 mechanism](splinefit/results/pipeline/mech6_tracing.jpg)
+
+*(a) Around a crossing: ridge tops in the layers of the first vessel (red, 135 degrees) and of the second
+(blue, 45 degrees). The two ridges cross without touching. (b) One step of a trace on the red vessel: of the
+nine positions one pixel ahead, only two are ridge tops. Straight ahead in the same layer (C = 12.9, score 12.9)
+beats one pixel aside (C = 12.2, score 0.85 x 12.2 = 10.4). (c) The trace's orientation stays near 130 degrees
+through the crossing, far from the other vessel's 45.*
+
+**On the whole image.**
 
 ![step 6 traces](splinefit/results/pipeline/step6_traces.jpg)
 
-*Left: the traces of each channel. Right: after merging, one colour per trace.*
+*Left: traces of each channel (fine red, medium blue, coarse green): 217, 138 and 73. Right: the 207 traces
+after merging, one colour each.*
 
 ![step 6 width](splinefit/results/pipeline/step6_width.jpg)
 
-*One cross-section of the widest long trace and its full width at half maximum.*
+*One cross-section of the widest long trace and its width at half height.*
 
-**What to look for:**
-- The channels overlap: the same vessel is traced at several scales, and the merge keeps one trace per
-  vessel.
-- The merged traces break up around the crossing cluster in the zoom. Pieces of one vessel come from
-  different channels or stop at another trace's claim. Every later step inherits this fragmentation.
+**What to watch for.** The merged traces break up around crossing clusters. Pieces of one vessel come from
+different channels or stop at another trace's claim. Later steps inherit this fragmentation.
 
-### Step 7. Junctions: the end-stopped cells
+## Step 7. Junctions: the end-stopped cells
 
-1. **Bridge gaps.** Join collinear ends at most 14 px apart that turn by less than 40 deg (mutual best
-   pairs).
-2. **Attach ends.** Extend a trace that ends within 12 px of another trace's centreline, outside its lumen,
-   to the attachment point.
-3. **Find events.**
-   - T: an end lies within 6 px + w/2 of another trace, either in a 45 deg cone ahead of the end or inside
-     the other trace's lumen.
-   - X: two traces intersect.
-4. **Cluster events** by complete linkage. Two events join when they are closer than r0 + (w_a + w_b) / 2,
-   with r0 = 4 px, which is the size of the lumen overlap. The junction centre is the mean of its events;
-   its radius is the farthest reach.
-5. **Type by arms.** An arm is a trace leaving the junction disc, at least 6 px long.
-   - 3 arms: a 3-way junction.
-   - 4 arms that pair into two straight lines (turn < 40 deg) at clearly different orientations: a
-     crossing.
-   - Otherwise (4 unpaired arms, or 5 or more): compound.
-   - A region of radius 16 px or more is compound whatever its arms. This is a prior fitted on dev.
-6. **Cut.** Cut every trace at its point nearest each of its junctions, so that every edge runs from
-   junction to junction.
+**Goal.** Find where vessels meet, decide what kind of meeting it is, and cut the traces into edges that run
+from junction to junction.
 
-Here this gives 93 junctions and 230 edges.
+**Idea.** End-stopped cells respond where a line ends inside their receptive field. A line that ends on
+another line signals a junction (a T or a Y). Two lines that both continue through a point signal a crossing
+(an X). Nearby events belong to the same junction, and the junction's type follows from the vessels leaving it.
+
+**Algorithm.**
+
+```
+traces = traces at least 10 px long
+
+# 1. Join collinear gaps (repeat until nothing changes):
+for every pair of trace ends at most 14 px apart (from different traces):
+    turn = angle between the two ends' outward directions (head-on = 0); for a gap longer than 2 px
+           (unless it is under 6 px and offset sideways by at most max(3, 0.3 w)), also the turn onto the bridge
+    if turn <= 40 deg: cost = gap length + 0.3 * turn
+join the mutually best pairs (each is the other's lowest-cost partner) into one trace
+
+# 2. Widths: every trace's width w = its OD width from step 6 (at least 1.5 px)
+
+# 3. Events
+T events: for each trace end p, with outward direction d:
+    look for the nearest point q on another trace (or far along the same trace)
+        within 6 + w_q / 2 px, where q is either inside that vessel's lumen (|q - p| <= max(2, w_q / 2))
+        or ahead of the end (within 45 deg of d)
+    the event is where the end's own line meets the other centreline (else at q);
+    if the end lies outside the other lumen and that point is within 12 px, the end is extended to it later
+X events: every point where two traces intersect
+
+# 4. Group events into junctions (complete linkage: EVERY pair in a group must be close enough)
+close(a, b) = distance(a, b) <= 4 + (thin_a + thin_b) / 2        # thin = the thinner vessel's width at the event
+    and, if a and b share a trace: <= 4 + (other_a + other_b) / 2 is also enough   # other = the crossing vessel's width
+    and never if they are more than 23.8 px apart
+for each group:
+    centre = mean of its events
+    radius R = max over its events of (distance to the centre + 4 + the wider vessel's width / 2)
+
+# 5. Arms: for each trace in the group, the stretches before and after its run through the disc, each kept
+#    if it is at least 6 px long. Direction = from the centre to the point 4 samples outside the disc.
+
+# 6. Type
+if arms < 3:  no junction
+if arms == 3: 3-way
+if arms == 4: pair the arms into two lines (prefer pairs on the same trace, then the smallest worst turn);
+              crossing if both pairs turn by at most 40 deg AND the two lines are at least 15 deg apart;
+              else compound
+if arms >= 5: compound
+if R >= 16 px: compound, whatever the arms           # a prior fitted on development scenes
+
+# 7. Extend the ends found in step 3 to their attachment points, then cut every trace at its point nearest
+#    each of its junctions. Drop pieces that lie inside one junction, and free pieces whose stretch outside
+#    the junction disc is under 6 px.
+```
+
+**Settings.**
+
+| setting | value | what it controls |
+|---|---|---|
+| gap join | 14 px, turn under 40 deg | which broken pieces are rejoined |
+| attachment reach | 6 px + half the other vessel's width | how far an end may be from a vessel to make a T |
+| attachment cone | 45 deg | how far off its own direction an end may attach |
+| r0 | 4 px | the base size of a junction region |
+| minimum arm | 6 px | how long a stretch must be to count as an arm |
+| crossing test | pairs turn under 40 deg, lines 15 deg apart | when 4 arms make a crossing |
+| compound radius | 16 px | larger regions are typed compound |
+
+**How it works.**
+
+![step 7 mechanism](splinefit/results/pipeline/mech7_junctions.jpg)
+
+*Three junctions from the example image. Left: one trace ends on another (one T event), giving three arms:
+3-way. Middle: two traces cross (one X event), giving four arms that pair into two straight lines (worst turn
+10 degrees, lines 89 degrees apart): crossing. Right: one T and one X event close together merge into one
+region with five arms: compound.*
+
+**On the whole image.**
 
 ![step 7](splinefit/results/pipeline/step7_junctions.jpg)
 
-*Edges, one colour each; junction markers by type (cyan 3-way, magenta crossing, yellow compound); white
-discs are the junction regions.*
+*Edges cut at junctions (one colour each), junctions by type (cyan 3-way, magenta crossing, yellow compound),
+and their discs. There are 93 junctions and 230 edges.*
 
-**What to look for:**
-- Along the wide vessels, every small vessel that ends on them makes a junction. Neighbouring ones merge
-  into compound regions: the chains of yellow squares.
-- The type depends on how many traced arms leave the disc. A missing arm (a branch the tracing lost) turns
-  a 3-way into nothing, or a crossing into a 3-way.
+**What to watch for.** A junction's type is counted from traced arms. One lost arm turns a crossing into a
+3-way, or a 3-way into nothing. Along wide vessels, each small vessel ending on them makes a junction, and
+neighbouring ones merge into compound regions.
 
-### Step 8. Render, compare, prune
+## Step 8. Render, compare, prune
 
-1. **Profiles.** Every few px along each trace, take the median OD cross-section and fit a blurred box,
-   `a box(u; r, s) + b`, with r <= 0.75 w + 2.
-2. **Render.** Add up the profiled edges.
-3. **Weights.** Each pixel's weight is `1 / sigma^2`, where sigma^2 is the local variance of `OD - G_8 * OD`
-   over the background (sigma 32 px). The weight is zero in the junction discs (0.7 x the radius), where an
-   additive render is known to be wrong.
-4. **Greedy MDL.** Repeatedly remove the free-end edge that fails worst on one of two tests, until every
-   such edge passes both:
-   - gain >= 2 (1 + L / 20), where the gain is the weighted squared residual the edge removes (its contrast
-     refitted against what the other edges leave) divided by 6, the texture's correlation area in px^2;
-   - the CNR of its profile in its own band is at least 0.5.
+**Goal.** Remove edges that the image does not support: duplicates, spurs, false arms.
 
-Two rounds are run. Here the first round removes 19 of the 230 edges.
+**Idea.** Draw the whole graph as an image of OD and compare it with the target. An edge is kept only if it
+explains enough of the target to be worth describing, and if it is visible above the noise. This is the
+diffusion-model lesson, applied deterministically: predict the image, look at what is left over, revise.
+
+**Algorithm.**
+
+```
+# 1. Profiles: every 6 px along each trace, take the median OD cross-section over +-max(6, w) px along the
+#    trace and fit  a * box(u; r, s) + b,  with r <= 0.75 w + 2 (w = the trace's readout width):
+#        box(u; r, s) = a flat-topped bar of half width r blurred by a Gaussian of width s, peak 1
+#        (Phi = the normal cumulative distribution: (Phi((r - u)/s) - Phi((-r - u)/s)) / (Phi(r/s) - Phi(-r/s)))
+#    r is searched on 22 values from 0.5 to 30 px, s on 10 values from 0.7 to 10 px; a and b by least squares.
+#    Between fits: linear interpolation, and a running median of 3.
+
+# 2. Render: every edge drawn as a tube with these profiles (each pixel takes the profile of its nearest
+#    centreline point; the ends are cut square), all edges ADDED: R = sum of tubes.
+
+# 3. Weights: w = 1 / sigma^2, with sigma = local_rms(OD - blur(OD, 8), bg, window=32)   # texture included
+#    w = 0 on invalid pixels and inside every junction disc (radius 0.7 R), where the sum is known to be wrong
+
+# 4. Two tests per edge k, with p = its tube and r = the residual without it (target - all other edges):
+gain_k = (sum p r w)^2 / (sum p^2 w) / 6        # the weighted error it removes with its best contrast;
+                                                 # divided by 6 px^2, the texture's correlation area
+cost_k = 2 * (1 + length_k / 20)
+cnr_k  = median(a) * max over bands b of (band-b response of its profile / median band-b noise along it)
+value_k = min(gain_k / cost_k, cnr_k / 0.5)      # fails if below 1
+
+# 5. Greedy pruning: only edges with a free end can be removed
+#    (an edge between two junctions is part of a vessel that continues)
+while some free-end edge has value < 1:
+    remove the one with the lowest value
+    recompute the value of every edge whose tube overlaps it
+
+# Two rounds: build the graph (step 7), profile, prune; the traces lose the removed stretches; repeat.
+```
+
+**Settings.** Cost 2 x (1 + length / 20); visibility 0.5; correlation area 6 px^2; junction discs 0.7 x the
+radius; 2 rounds.
+
+**How it works.**
+
+![step 8 mechanism](splinefit/results/pipeline/mech8_prune.jpg)
+
+*Left: all 230 edges of the first round, by the two tests (values before any removal). Of the 78 edges with a
+free end, 19 are removed. Most removed edges explain essentially nothing: they duplicate a vessel another edge
+already explains, so the other edges "explain them away". A few fail the visibility test. Edges between two
+junctions (grey) are never removed, even if they fail. Right: the removed edges on the image.*
+
+**On the whole image.**
 
 ![step 8](splinefit/results/pipeline/step8_prune.jpg)
 
-*The additive render, the residual (red: OD not explained; blue: over-predicted) and the first round's
-prune (blue kept, red removed).*
+*The additive render, the residual (red: target OD not explained; blue: too much), and the first round's prune
+(blue kept, red removed).*
 
-**What to look for:**
-- The dark ticks across the wide vessel are cut points. The two pieces of a vessel cut at a junction
-  overlap there and add up. The prune gives them no weight, but this is why the final render must treat
-  nodes differently (step 10).
-- The red residual along the wide vessels' edges is OD the boxes do not explain.
+**What to watch for.** The dark ticks across the wide vessel are cut points, where two pieces of one vessel
+overlap and add up. They carry no weight here, but they show why step 10 treats junctions differently.
 
-## Steps 9-12: the whole-image spline fit
+# Part 2. Fitting a drawing of the graph to the image
 
-### Step 9. The spline network
+## Step 9. The spline network
 
-The proposal becomes a network of clamped cubic B-splines (vesselmap's `VesselNetwork`):
+**Goal.** Turn the proposal's edges into one smooth curve per vessel, so that a vessel crossing another is one
+object, and a parent vessel continues through a branch point.
 
-- **Crossings.** A junction typed crossing with four incident ends is not a node. Its ends pair into the two
-  straightest lines, same trace first, and each line passes through as one continuous edge.
-- **Joints.** A junction with two ends that turn by less than 60 deg is a pass-through.
-- **Nodes.** Every other junction with at least three ends is a node.
-  - Two ends of the same trace that turn by less than 40 deg become one edge through the node: the parent
-    vessel continues, and the branch ends on it.
-  - The other ends end at the node.
-- **Free ends** become degree-1 nodes.
-- **Edges.** Each chain of pieces linked through crossings, joints and through-nodes is one edge. Its
-  control-point spacing adapts to calibre and curvature.
-- **Profiles.** Each edge has r, s and a profile splines. The box widths are converted to a cylinder chord:
-  half width x 1.2, and contrast divided by the cylinder's blurred peak.
+**Idea.** In the proposal, every edge stops at every junction. Real vessels pass through crossings and through
+the points where branches leave them. A smooth curve per vessel has fewer parameters and no artificial ends.
+
+**Algorithm.**
+
+```
+for each junction J, with its incident edge ends:
+    if J is a crossing with exactly 4 ends:
+        pair the ends into two lines (same trace first, then the straightest)
+        if both pairs turn by at most 45 deg: link each pair (the vessel passes through); NO node
+        (continue to the next junction)
+    if J has exactly 2 ends of different edges turning by at most 60 deg: link them (a joint); no node
+    if J has at least 2 ends: J is a node
+        link pairs of ends of the SAME trace that turn by at most 40 deg (straightest first),
+        keeping at least one end ending at the node: the parent passes through, the branch ends on it
+chains = follow the links from every unlinked end: each chain is one vessel
+for each chain:
+    xy = the pieces' points joined; its ends moved onto their nodes
+    profiles: half width = 1.2 x the box half width; blur s at least 0.65;
+              contrast = box peak / the cylinder's blurred peak       # box -> cylinder (step 10)
+    fit a clamped cubic B-spline to xy, its control points spaced as widely as the curve allows
+    (it must follow the points within 0.15 x the vessel's calibre, at least 0.6 px)
+    a node the chain passes through is moved onto the curve
+```
+
+**How it works.**
+
+![step 9 mechanism](splinefit/results/pipeline/mech9_network.jpg)
+
+*Top: a crossing. In the proposal (left), four edges stop at it. In the network (right), they pair into two
+continuous curves that cross with no node. Bottom: a 3-way. The parent vessel (green) passes through the node
+(ring), and the branch (purple) ends on it. Dots are the curves' control points.*
+
+**On the whole image.**
 
 ![step 9](splinefit/results/pipeline/step9_network.jpg)
 
-*The initial network (left) and the fitted, pruned network (right). Dots are control points (zoom only);
-white rings are nodes of degree 3 or more.*
+*The initial network (left) and the fitted, pruned network (right). Rings are nodes where three or more ends
+meet.*
 
-### Step 10. The render model
+## Step 10. The render model
 
-Each edge e contributes `a_e P(d; r_e, s_e) T_e` at a pixel at distance d from its centreline:
-- P is the chord of a cylinder, `sqrt(1 - (d / r)^2)`, blurred by a Gaussian of std s in closed form;
-- T_e fades the end caps with the same blur.
+**Goal.** Draw the network as an OD image that can be compared with the target pixel by pixel, and that changes
+smoothly as the curves move, so that gradient descent can adjust them.
 
-The contributions are summed, except in small windows around nodes and crossings. Those are corrected in a
-sharp domain (blur 0.5 px), then blurred to the local blur:
+**Idea.** A vessel is a cylinder of blood. The light path through it at distance d from its axis is the chord
+`2 sqrt(r^2 - d^2)`, so its OD profile is a half-ellipse, blurred by the optics. Where vessels overlap, what to
+draw depends on how they overlap:
 
-- **node (fork):** `D = max_m cap_m - sum_m butt_m`. The lumens meeting there are one blood volume, so the
-  render takes their union with round caps, not their sum.
-- **crossing:** `D = -(1 - kappa)(sum_m c_m - max_m c_m)`. The two vessels lie at different depths and
-  their ODs nearly add. kappa is fitted per image, starting from 0.87. A crossing is detected geometrically:
-  two centrelines within 1 px of each other, at least 15 deg apart.
-- **halo:** the whole render passes `(1 - h) X + h G(s_h) * X`, with h and s_h fitted (starting at 0.25 and
-  6 px).
+- at a **fork** the lumens join into one volume of blood, so the drawing should be the union of the lumens,
+  not their sum;
+- at a **crossing** the vessels lie at different depths and their ODs nearly add.
 
-![step 10](splinefit/results/pipeline/step10_render_model.jpg)
-
-*One cross-section: one vessel at three blurs; a fork, where the union is lower than the sum; a crossing,
-where the OD is nearly additive; the halo.*
-
-### Step 11. The loss
+**Algorithm.**
 
 ```
-loss = sum over pixels of w (OD - R(theta))^2
-       + 600 x bending energy of the centrelines   (sum |second difference of control points|^2 / h^3)
-       + 20  x smoothness of log r, log s, log a along each edge
-       + 300 x calibre prior                        (log r may not stray beyond x1.6 of its edge mean)
-       + cusp, even-spacing and attachment priors  (a node an edge passes through stays on its centreline)
-       + anchor (std 4 px) to the start positions  (joint stage only)
+for each pixel near edge e (within r + 3 s + 1.5 px), with d = its distance from the centreline and the
+nearest centreline point's half width r, blur s and centre OD a:
+    m_e = a * P(d; r, s) * T_e
+    P(d; r, s) = the chord profile sqrt(1 - (d / r)^2), built as 6 nested bars, each blurred by a Gaussian of
+                 width s in closed form (with erf), so P is smooth in d, r and s
+    T_e        = the end caps: the vessel fades over its last few pixels with the same blur, so two collinear
+                 pieces meeting at a node sum to exactly one
+V = sum over edges of m_e                            # the plain sum
+
+# corrections in small windows ("sites") around nodes and crossings, computed on sharp lumens (blur 0.5 px)
+# and then blurred to the local blur:
+at a node:      D = max over the members of (lumen with a round end) - sum over the members of (lumen with a cut end)
+                # replaces the sum by the union of the lumens
+at a crossing:  D = -(1 - kappa) * (sum of the two lumens - the larger one)
+                # removes (1 - kappa) of the overlap; kappa is fitted per image, starting at 0.87
+                # a crossing site = two centrelines within 1 px of each other, at least 15 deg apart
+V = V + D (blurred, tapered to zero at the window's edge)
+
+R = (1 - h) * V + h * blur(V, s_h)                   # the halo: light scattered in tissue; h, s_h fitted
+                                                      # (starting at 0.25 and 6 px)
 ```
 
-The weight w is step 8's `1 / sigma^2`, and zero off valid data. sigma includes the background texture,
-which on an averaged still is much larger than the pixel noise. The optimiser is Adam with a cosine-decayed learning
-rate.
+**How it works.**
 
-### Step 12. The fit schedule
+![step 10 one dimension](splinefit/results/pipeline/step10_render_model.jpg)
 
-1. **Profiles.** 30 iterations of the profiles and optics (r, s, a, halo, kappa), geometry frozen.
-2. **Joint fit.** 100 iterations of everything, positions included, anchored to where the stage started.
-3. **MDL prune.**
-   - An edge must explain more weighted error than its description costs:
-     `n_params x log(pixels) x 0.25 / 2`, with the gain divided by the 6 px^2 correlation area.
-   - A faint wide edge must also be seen against background on both flanks; otherwise it is illumination
-     roll-off.
-   - Here the prune removes 7 edges and leaves 85.
-4. **Retarget.** Refit the background outside a better mask: stage 1's mask OR the fitted render's support
-   (R > 0.5 x the local noise, dilated 3 px). Then `OD = B - L` again.
-5. **Final fit.** 60 iterations of the profiles and optics on the new target, geometry frozen.
+*One cross-section: a vessel's chord profile at three blurs; a fork, where the union is lower than the sum; a
+crossing, where the OD nearly adds; the halo.*
+
+![step 10 mechanism](splinefit/results/pipeline/mech10_junction_render.jpg)
+
+*On the fitted network. Top, a fork: the plain sum is too dark at the centre (0.606 OD against a target of
+0.450); the union gives 0.446. Bottom, a crossing: the fitted kappa is 0.94, so the correction is small (sum
+0.267, corrected 0.262, target 0.256).*
+
+## Step 11. The loss
+
+**Goal.** One number that says how badly the drawing matches the target, so that it can be minimised.
+
+**Algorithm.**
+
+```
+loss = 0.5 * sum over valid pixels of w * (OD - R)^2               # the data error, precision-weighted
+     + 600  * sum over consecutive control points of |c_i - 2 c_(i+1) + c_(i+2)|^2 / h^3
+                                                                   # bending (h = the control spacing)
+     + 2000 * sum of (fold-back between consecutive control spans)^2          # no cusps
+     + 50   * sum of ((length of a span - length of the previous) / h)^2       # even spacing
+     + 300  * sum of max(0, |ln r - mean ln r of its edge| - ln 1.6)^2         # a vessel's width may not
+                                                                               # balloon or pinch locally
+     + 20   * sum of (change of ln r, ln s, ln a between profile knots)^2      # smooth profiles
+     + 2000 * sum of (sideways offset of a node from a curve passing through it)^2
+     + sum of |position - starting position|^2 / (2 * 4^2)                    # anchor: positions stay within
+                                                                               # about 4 px of where they started
+```
+
+w is the precision weight of step 8: 1 / (local texture variance), zero off valid data. On an averaged still,
+texture is the main source of mismatch, so textured areas count less.
+
+## Step 12. The fit schedule
+
+**Goal.** Adjust every parameter (curve positions, widths, blurs, contrasts, halo, kappa) to minimise the loss,
+in an order that avoids bad local solutions, and remove what does not pay for itself.
+
+**Algorithm.**
+
+```
+stage 1: 30 iterations, profiles, halo and kappa only (positions fixed)
+stage 2: 100 iterations, everything, positions included
+         (Adam; step sizes: positions 0.15, profiles 0.04, halo 0.02, kappa 0.02;
+          each stage's step sizes decay from 1x to 0.1x on a cosine;
+          every 25 iterations the pixels are re-assigned to their nearest edge and the sites re-detected;
+          after every step, widths and blurs are clipped to their limits)
+stage 3: prune. For every edge (not only free-end edges):
+         gain = how much the data error would rise if the edge were removed, everything else fixed
+                (for an edge wider than 8 px: also with its low-frequency part given to a smooth background,
+                 taking the smaller gain), divided by 6 (the correlation area)
+         penalty = 0.25 * 0.5 * n_params * ln(max(the edge's pixels / 6, 2)),
+                   n_params = 4 + 2 * length / 15 + 3 * max(2, length / 30 + 1)
+         remove the edge if gain < penalty, or if it is wide and faint (mean contrast under 0.1) and its two
+         flanks (at r + 2 s on each side) lie on valid data for less than half of its length
+         then tidy the topology (merge joints, drop nodes no edge ends at)
+         retarget: refit the background outside (stage 1's mask OR where the render exceeds 0.5 x the local
+         noise, dilated 3 px), with sigma 16 px; the new target is OD = B - L
+stage 4: 60 iterations, profiles, halo and kappa only, on the new target
+```
+
+**How it works.**
+
+![step 12 mechanism](splinefit/results/pipeline/mech12_fit.jpg)
+
+*The data error per iteration. Stage 1 (profiles only) cuts it from 1.29 million to 0.50 million. Stage 2,
+with positions free, takes it to 0.11 million. The prune removes 7 edges, leaving 85. Stage 4 starts higher
+(0.39 million) because the retargeted target contains OD the background used to absorb, and ends at 0.16
+million. Right: each stage's step-size factor.*
+
+**On the whole image.**
 
 ![step 12](splinefit/results/pipeline/step12_fit.jpg)
 
-*Top: the stage-1 target, the precision weight (log scale) and the fitted render. Bottom: the retargeted
-target, what the retarget changed, and the final residual on the same scale as step 8.*
+*Top: the stage-1 target, the precision weight (log scale; dark = textured, trusted less), the fitted render.
+Bottom: the retargeted target, what the retarget changed (red: OD added, mostly around junctions and wide
+vessels), and the final residual on the same scale as step 8.*
 
-**What to look for:**
-- The retarget adds OD (red) around junctions and along the wide vessels: OD that stage 1's background had
-  absorbed.
-- The residual is far smaller than step 8's. Within the vessel band, the render holds 98.8 % of the
-  image's OD under the true background (the scorer's `explained`: 1 - sum (OD_obs - R)^2 / sum OD_obs^2).
+## Step 13. Export and the result
 
-### Step 13. Export and the result
-
-Each fitted edge is cut at every node it passes through, so each polyline runs junction to junction. Nodes
-of degree 3 or more keep the proposal's junction type when they had one. Crossings are found geometrically
-in the fitted render. The output also carries the render and the target.
+**Algorithm.** Every fitted curve is cut at each node it passes through, so each output edge runs from junction
+to junction. Each node where three or more ends meet keeps the proposal's junction type if it had one; else it
+is a 3-way (three ends) or compound (four or more). Each crossing found by the render (two curves within 1 px)
+is output as a crossing.
 
 ![step 13](splinefit/results/pipeline/step13_output.jpg)
 
-*The truth (left) and the output (right). Rings on the right are the truth junctions; filled markers are the
+*The truth (left) and the output (right). Rings on the right are the true junctions; filled markers are the
 output's.*
 
-On this development image:
+**How it is scored** (this image, development):
 
-| metric | value |
-|---|---|
-| line F1 | 0.85 |
-| strict junction F1 | 0.72 |
-| balanced junction-type accuracy | 0.48 |
-| edge cover | 0.73 |
-| composite | 0.781 |
+| score | meaning | value |
+|---|---|---|
+| centreline F1 | how well output and true centrelines overlap within 3 px (combines "output on a true vessel" and "true vessel found") | 0.85 |
+| junction F1, strict | the same for junction positions, matched within 23.8 px | 0.72 |
+| junction type, balanced | of matched junctions, the share with the right type (3-way, crossing, compound), averaged over the three types | 0.48 |
+| edge cover | for each true edge, the share of its length covered by its single best output edge | 0.73 |
+| explained OD | within the vessel band, 1 - (squared error of the render) / (squared OD), against the image's OD under the true background | 0.988 |
 
-On the 6 held-out averages the same pipeline scores line F1 0.840, junction F1 0.672 and type accuracy
-0.564 (REPORT.md, section 4).
+On the 6 held-out images the same pipeline scores 0.840, 0.672, 0.564 and 0.713 on the first four
+([REPORT.md](REPORT.md), section 4).
 
-## Where it falls short, and what to change
+# Where it falls short, and what to change
 
-The 95 % bar is per junction, not per image. Each truth junction asks three things:
-- was a junction found within the strict radius;
-- did it get the right coarse type;
-- does the render hold 95 % of vesselscene's clean OD in its disc?
+The 95 % bar applies per junction, not per image. Each true junction is asked three questions: was a junction
+found within the strict radius; does it have the right type; does the render hold 95 % of the scene's clean OD
+in its disc? Over the 500 junctions of the 6 held-out images:
 
-Over all 500 observable junctions of the 6 held-out averages (`junction_gallery.py`):
-
-| junction type | n | found | right type | render >= 0.95 | all three |
+| junction type | number | found | right type | render >= 95 % | all three |
 |---|---|---|---|---|---|
 | 3-way | 176 | 38 % | 24 % | 52 % | 11 % |
 | crossing | 135 | 73 % | 36 % | 53 % | 23 % |
 | compound | 189 | 74 % | 42 % | 54 % | 30 % |
 | **all** | 500 | **61 %** | **34 %** | **53 %** | **21 %** |
 
-For comparison, all three pass on 9 % of the junctions for the proposals and on 10 % for vesselmap.
+For comparison, all three hold for 9 % of junctions with the proposal alone (step 8's output) and 10 % with
+vesselmap.
 
 ![3-way](splinefit/results/heldout/junctions/junctions_3-way.jpg)
 
-*Eight 3-way junctions drawn at random from the held-out averages. Each row shows the image, the truth
-graph, the fitted graph, vesselscene's render, the fitted render and their difference, 64 px around the
-junction.*
+*Eight 3-way junctions drawn at random from the held-out images. Each row: the image, the true graph, the
+fitted graph, the scene's own render, the fitted render, and their difference, 64 px around the junction.*
 
 ![crossings](splinefit/results/heldout/junctions/junctions_crossing.jpg)
 
@@ -402,48 +848,50 @@ junction.*
 
 *The same for eight compound junctions.*
 
-### The changes, in order
+**The changes, in order.**
 
-1. **Fit the background outside a mask made from the OD, not the vesselness mask.** On the pathologic
-   development scene, step 1's mask covers 46 % of the true lumen and 37 % of the wide vessels' lumen.
-   Everything it misses is absorbed by the background and lost from the target. Hysteresis on the OD itself
-   (seeds above 3 x the noise, grown above 1.5 x) covers 70 % and 66 %. On the OD smoothed by 3 px it covers
-   75 % and 71 %. The mask stays a background tool only: as a fitting term (E23) it lowered positions.
+1. **Fit the background outside a mask made from the OD, not the contrast-to-noise mask** (step 1). On the
+   pathologic development scene, step 1's mask covers 46 % of the true vessel area and 37 % of the wide
+   vessels'. A hysteresis mask on the OD itself (seeds above 3 x the noise, grown above 1.5 x) covers 70 % and
+   66 %; on the OD smoothed by 3 px, 75 % and 71 %. Everything the mask misses is lost from the target (the
+   leak figure in step 1). The mask stays a background tool only: used as a fitting term (experiment E23),
+   it made positions worse.
 
-   ![mask](splinefit/results/pipeline/improve_mask.jpg)
+   ![mask coverage](splinefit/results/pipeline/improve_mask.jpg)
 
-   *Red: true lumen the mask misses, which the background absorbs. Green: covered. Grey: mask on the blur
-   flanks.*
+   *Red: true vessel area the mask misses, which the background absorbs. Green: covered. Grey: mask on the
+   blurred edges of vessels.*
 
-2. **Search for side branches along every traced vessel.** Only 38 % of 3-way junctions are found, against
-   73-74 % for crossings and compounds. Step 7 forms a 3-way junction only when a trace ends on its parent
-   within reach, so the junction is lost whenever the branch's trace stops short, never reaches the parent,
-   or is pruned. Walk along each traced vessel instead and test, on each side, for a line leaving it in the
-   orientation score of step 5. Accept it against the residual of the fit, not against a fixed threshold.
-3. **Type junctions by comparing local models.** Only 34 % get the right type. Today the type is counted from
-   traced arms (step 7), and a lost arm changes it. Instead, render the competing hypotheses in the junction
-   disc: fork, crossing, T, or two nearby forks. Fit each locally to the OD and keep the one with the
-   smallest residual plus description cost. The step-10 render already distinguishes them: a fork is a
-   union, and a crossing is nearly additive.
-4. **Choose the continuing vessel by turn and width.** At a node, the parent vessel is the pair of arms with
-   the smallest turn and the most similar widths. The daughter widths should satisfy Murray's law,
-   `r_parent^3 = r_1^3 + r_2^3`. This replaces the current same-trace rule, which only links pieces of one
-   trace.
-5. **Keep false-alarm control in the proposer.** E22 linked pieces across gaps and traces. On faint texture,
-   a link made two false pieces one edge that then survived the prune. Continuity has to come from the
-   tracing (steps 5-6), with each piece judged on its own evidence.
-6. **Measure per junction.** The image-level scores average over hundreds of junctions and hide the 21 %.
-   Track the table above for every change.
+2. **Search for side branches along every traced vessel** (steps 6-7). Only 38 % of 3-way junctions are found,
+   against 73-74 % of crossings and compounds. Step 7 makes a 3-way only when a trace ends on its parent within
+   reach, so the junction is lost whenever the branch's trace stops short, never reaches the parent, or is
+   pruned. Walk along each traced vessel instead and look, on each side, for a line leaving it in the score of
+   step 5. Accept it by the drop in the fit's error, not by a fixed threshold.
+3. **Type junctions by comparing local models** (step 7). Only 34 % get the right type, because the type is
+   counted from traced arms and a lost arm changes it. Instead, draw each competing hypothesis in the junction
+   disc (fork, crossing, T, two nearby forks), fit each to the OD, and keep the one with the smallest error
+   plus description cost. Step 10's render already tells them apart: a fork is a union, a crossing nearly adds.
+4. **Choose which vessel continues through a node by turn and width** (step 9). The parent is the pair of arms
+   with the smallest turn and the most similar widths. The daughter widths should satisfy Murray's law,
+   `r_parent^3 = r_1^3 + r_2^3`. This replaces the same-trace rule, which can only link pieces of one trace.
+5. **Look again at the surround's cost to crossings** (step 4). It removes 44 % of a crossing's response in
+   the step-4 figure, because a crossing's two lobes look partly "orientation-blind".
+6. **Keep false-alarm control in the proposer** (steps 4-6). Linking pieces across gaps after the fact
+   (experiment E22) let two false texture pieces become one edge that survived the prune. Continuity has to
+   come from the tracing, with each piece judged on its own evidence.
+7. **Measure per junction.** Image-level scores average over hundreds of junctions and hide the 21 %. Track
+   the table above for every change.
 
-## Reproduce
+# Reproduce
 
 ```
 export OMP_NUM_THREADS=2
-python -m experiments.splinefit.pipeline_figures --out experiments/splinefit/results/pipeline \
-    --scene healthy_s007_480x768 --mask-scene pathologic_s000_480x768      # dev scenes ($SPLINEFIT_DEV)
-SPLINEFIT_ALLOW_HELDOUT=1 python -m experiments.splinefit.junction_gallery <6 held-out scene dirs> \
-    --out experiments/splinefit/results/heldout/junctions                   # the scorecard and galleries
+python -m experiments.splinefit.pipeline_figures --out experiments/splinefit/results/pipeline      # whole-image figures
+python -m experiments.splinefit.pipeline_mechanisms --out experiments/splinefit/results/pipeline   # how-it-works figures
+SPLINEFIT_ALLOW_HELDOUT=1 python -m experiments.splinefit.junction_gallery <the 6 held-out scene folders> \
+    --out experiments/splinefit/results/heldout/junctions                                          # scorecard, galleries
 python -m experiments.splinefit.report_html experiments/PIPELINE.md pipeline.html
 ```
 
-The figure run takes about 3 minutes on 2 threads and is deterministic.
+Both figure scripts use the development scenes (healthy 7, and pathologic 0 for the mask figures), take about
+3 to 4 minutes each on 2 threads, and are deterministic.

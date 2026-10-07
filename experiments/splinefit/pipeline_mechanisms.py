@@ -506,6 +506,445 @@ def fig_step5(ctx, out):
     _save(fig, out, "mech5_association.jpg")
 
 
+# ---------------------------------------------------------------------------------------------- step 6
+def _candidates(C, cfg, valid):
+    """Stage 6's candidate rule (readout, re-stated for display): a local maximum across the line (+-1 px along
+    the normal), at least its two neighbouring orientation layers, above t_low, border_px inside valid data."""
+    from scipy import ndimage as ndi
+    n, H, W = C.shape
+    th = N.orientations(cfg)
+    cand = np.zeros(C.shape, bool)
+    for k, t in enumerate(th):
+        nx, ny = -math.sin(t), math.cos(t)
+        cand[k] = (C[k] >= N._shift(C[k], nx, ny)) & (C[k] > N._shift(C[k], -nx, -ny)) & (C[k] > cfg.t_low)
+    cand &= (C >= np.roll(C, 1, 0)) & (C > np.roll(C, -1, 0))
+    b = cfg.border_px
+    inner = ndi.binary_erosion(valid, iterations=b)
+    inner[:b], inner[-b:], inner[:, :b], inner[:, -b:] = False, False, False, False
+    return cand & inner[None]
+
+
+def _patch(ax, gray, cx, cy, half, title=None):
+    from matplotlib.patches import Rectangle
+    x0, y0 = int(round(cx - half)), int(round(cy - half))
+    sub = gray[max(y0, 0):y0 + 2 * half + 1, max(x0, 0):x0 + 2 * half + 1]
+    lo, hi = np.percentile(sub, [1, 99]) if sub.size else (0, 1)
+    ax.imshow(np.clip((gray - lo) / max(hi - lo, 1e-6), 0, 1), cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+    ax.set_xlim(x0 - 0.5, x0 + 2 * half + 0.5)
+    ax.set_ylim(y0 + 2 * half + 0.5, y0 - 0.5)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    if title:
+        ax.set_title(title, fontsize=9, loc="left")
+    return Rectangle
+
+
+def fig_step6(ctx, out, px):
+    plt = _plt()
+    cfg = ctx["cfg"]
+    C = ctx["C5"][0]
+    cand = _candidates(C, cfg, ctx["s1"]["ok"])
+    x, y = px["crossing"]
+    k1, _, k2, _ = _peaks(np.clip(C[:, y, x], 0, None))
+    n = cfg.n_orient
+    deg = lambda k: math.degrees(k * math.pi / n)                                  # noqa: E731
+    fig = plt.figure(figsize=(18, 6.0), layout="constrained")
+    gs = fig.add_gridspec(1, 3, width_ratios=[1, 1, 1.05])
+    # (a) candidates in the two crossing vessels' layers
+    ax = fig.add_subplot(gs[0, 0])
+    half = 22
+    _patch(ax, ctx["img"].astype(float), x, y, half,
+           f"(a) candidates (ridge tops above {cfg.t_low:g}) in the two vessels' orientation layers")
+    for kk, col in ((k1, "#ff3b3b"), (k2, "#3b8bff")):
+        ys, xs = np.nonzero(cand[[(kk - 1) % n, kk, (kk + 1) % n]].any(0))
+        m = (np.abs(xs - x) <= half) & (np.abs(ys - y) <= half)
+        ax.plot(xs[m], ys[m], "s", ms=4, color=col, alpha=0.85,
+                label=f"layers {deg(kk):.0f} deg +- one ({'first' if kk == k1 else 'second'} vessel)")
+    ax.legend(fontsize=8, frameon=True, loc="lower left")
+    # (b) one tracing step, re-stated from readout's walk: from a candidate on the first vessel, 8 px before the
+    # crossing, the 3 lateral positions x 3 layers one pixel ahead, their scores, the winner
+    t1 = np.array([math.cos(k1 * math.pi / n), math.sin(k1 * math.pi / n)])
+    best0 = None
+    for dd in range(6, 14):
+        for sg in (1, -1):
+            qx, qy = int(round(x - sg * dd * t1[0])), int(round(y - sg * dd * t1[1]))
+            if cand[k1, qy, qx] and (best0 is None or dd < best0[0]):
+                best0 = (dd, qx, qy, sg)
+    _, cx0, cy0, sg = best0
+    dx, dy = sg * t1
+    opts = []
+    for dk in (0, -1, 1):
+        kk = (k1 + dk) % n
+        tx, ty = math.cos(kk * math.pi / n), math.sin(kk * math.pi / n)
+        if tx * dx + ty * dy < 0:
+            tx, ty = -tx, -ty
+        nx, ny = -ty, tx
+        for o in (0, -1, 1):
+            qy, qx = int(round(cy0 + ty + o * ny)), int(round(cx0 + tx + o * nx))
+            ok = bool(cand[kk, qy, qx])
+            sc = float(C[kk, qy, qx]) * (1 - 0.15 * abs(o)) * (1 - 0.1 * abs(dk))
+            opts.append((sc if ok else -1.0, dk, o, qx, qy, ok, float(C[kk, qy, qx])))
+    win = max(opts)
+    ax = fig.add_subplot(gs[0, 1])
+    grid = np.full((3, 3), np.nan)
+    for sc, dk, o, qx, qy, ok, c in opts:
+        grid[dk + 1, o + 1] = sc if ok else np.nan
+    ax.imshow(np.nan_to_num(grid, nan=0.0), cmap="Greens", vmin=0, vmax=max(1.0, np.nanmax(grid) * 1.2))
+    for sc, dk, o, qx, qy, ok, c in opts:
+        txt = (f"C = {c:.1f}\nx {1 - 0.15 * abs(o):.2f} x {1 - 0.1 * abs(dk):.2f}\n= {sc:.1f}" if ok else
+               f"C = {c:.1f}\nnot a ridge top\n(not a candidate)")
+        ax.text(o + 1, dk + 1, txt, ha="center", va="center", fontsize=9)
+    ax.add_patch(plt.Rectangle((win[2] + 1 - 0.5, win[1] + 1 - 0.5), 1, 1, fill=False, ec="#d62728", lw=3))
+    ax.set_xticks([0, 1, 2], ["1 px to one side", "straight ahead", "1 px to the other side"], fontsize=8)
+    ax.set_yticks([0, 1, 2], [f"layer - 1\n({deg((k1 - 1) % n):.0f} deg)", f"same layer\n({deg(k1):.0f} deg)",
+                              f"layer + 1\n({deg((k1 + 1) % n):.0f} deg)"], fontsize=8)
+    ax.set_title(f"(b) one step from ({cx0}, {cy0}): 9 positions 1 px ahead (red = chosen)", fontsize=9, loc="left")
+    # (c) the orientation of the fine trace through the crossing, +-40 px around it
+    ax = fig.add_subplot(gs[0, 2])
+    tr = min(ctx["traces"][0], key=lambda t: float(np.min(np.hypot(t["xy"][:, 0] - x, t["xy"][:, 1] - y))))
+    tg = N._tangents(tr["xy"], 2)
+    ang = np.degrees(np.arctan2(tg[:, 1], tg[:, 0]) % math.pi)
+    sarc = np.r_[0, np.cumsum(np.hypot(*np.diff(tr["xy"], axis=0).T))]
+    i0 = int(np.argmin(np.hypot(tr["xy"][:, 0] - x, tr["xy"][:, 1] - y)))
+    m = np.abs(sarc - sarc[i0]) <= 40
+    ref = ang[i0]
+    ang = ref + (ang - ref + 90) % 180 - 90                                      # no jumps at 0 / 180
+    ax.plot(sarc[m] - sarc[i0], ang[m], "-", color="#ff3b3b", lw=2.5, label="the traced vessel's orientation")
+    other = ref + (deg(k2) - ref + 90) % 180 - 90
+    ax.axhline(other, color="#3b8bff", lw=2, ls=":", label="the crossing vessel's orientation")
+    ax.axvline(0, color="#888888", lw=1.5, ls="--", label="the crossing")
+    ax.set_xlabel("px along the trace from the crossing")
+    ax.set_ylabel("orientation (deg)")
+    ax.legend(fontsize=8, frameon=False, loc="best")
+    ax.set_title("(c) the trace keeps its own orientation straight through the crossing", fontsize=9, loc="left")
+    fig.suptitle("Step 6, how it works: each vessel is a ridge in its own orientation layer, so two vessels can cross "
+                 "without their ridges touching; a trace steps along its ridge", fontsize=12, x=0.01, ha="left")
+    _save(fig, out, "mech6_tracing.jpg")
+    return dict(layers=(deg(k1), deg(k2)), step=[(round(o[0], 2), o[1], o[2], o[5]) for o in opts])
+
+
+# ---------------------------------------------------------------------------------------------- steps 7-8
+def stage78(ctx):
+    """The pipeline's stage 7 on the merged traces (_assemble_profiled), its events and clusters re-derived the
+    way end_stopping does (checked against its junctions), and stage 8's first prune round."""
+    cfg, OD, s1 = ctx["cfg"], ctx["s1"]["OD"], ctx["s1"]
+    edges, juncs, traces = N._assemble_profiled([dict(t) for t in ctx["merged"]], cfg, OD)
+    tr = [dict(t) for t in ctx["merged"] if N._plen(t["xy"]) >= cfg.min_len]
+    tr = N._join_gaps(tr, cfg)
+    tr.sort(key=lambda t: (-len(t["xy"]), float(t["xy"][0, 0]), float(t["xy"][0, 1])))
+    for t in tr:
+        t["w_ro"] = np.asarray(t["w"], float).copy()
+        t["w_od"], t["a_od"] = N.od_widths(OD, t["xy"], t["w"])
+        t["w"] = np.clip(t["w_od"], 1.5, None)
+    ev = N._events(tr, cfg)
+    groups = N._cluster_events(ev, cfg)
+    cl = []
+    for g in groups:
+        E = [ev[k] for k in g]
+        c = np.mean([e["p"] for e in E], 0)
+        R = max(math.hypot(*(e["p"] - c)) + cfg.r0 + 0.5 * e["wide"] for e in E)
+        cl.append((c, R, E))
+    for J in juncs:                                    # every junction is one of the re-derived clusters
+        assert min(math.hypot(J["x"] - c[0], J["y"] - c[1]) for c, _, _ in cl) < 1e-6
+    hp = OD - N._gblur(OD, 8.0)
+    sig2 = np.where(s1["ok"], np.maximum(N._local_rms(hp, s1["bg"], 32.0), 1e-4) ** 2, 1e12)
+    jm = N._junction_mask(OD.shape, juncs, cfg)
+    sw = np.where(jm, 1e12, sig2)
+    rd0 = N._Render(OD, sw, edges, cfg)
+    gains = np.array([rd0.gain(k) for k in range(len(edges))])
+    keep, rd = N._mdl_prune(OD, sw, edges, cfg, ctx["rms"])
+    cost = np.array([cfg.mdl_k * (1 + N._plen(e["xy"]) / cfg.mdl_len) for e in edges])
+    cnr = np.array([e.get("cnr", np.inf) for e in edges])
+    free = np.array([e["j"][0] is None or e["j"][1] is None for e in edges])
+    return dict(edges=edges, juncs=juncs, traces=tr, events=ev, clusters=cl, keep=np.array(keep), gains=gains,
+                cost=cost, cnr=cnr, free=free, render=OD - rd.residual())
+
+
+def _decision(J, cfg):
+    arms = J["arms"]
+    n = len(arms)
+    if n == 3:
+        s = "3 arms -> 3-way"
+    elif n == 4:
+        best = None
+        for (a, b), (c, d) in (((0, 1), (2, 3)), ((0, 2), (1, 3)), ((0, 3), (1, 2))):
+            ua, ub, uc, ud = (arms[k][2] for k in (a, b, c, d))
+            t1, t2 = N._angle(ua, -ub), N._angle(uc, -ud)
+            same = (arms[a][0] == arms[b][0]) + (arms[c][0] == arms[d][0])
+            key = (-same, max(t1, t2))
+            if best is None or key < best[0]:
+                best = (key, ua - ub, uc - ud, max(t1, t2))
+        _, ax1, ax2, turn = best
+        ax1, ax2 = ax1 / np.linalg.norm(ax1), ax2 / np.linalg.norm(ax2)
+        sep = min(N._angle(ax1, ax2), N._angle(ax1, -ax2))
+        ok = turn <= cfg.cross_turn_deg and sep >= 15.0
+        s = (f"4 arms pair into 2 lines: worst turn {turn:.0f} deg ({'<=' if turn <= cfg.cross_turn_deg else '>'} "
+             f"{cfg.cross_turn_deg:g}), lines {sep:.0f} deg apart ({'>=' if sep >= 15 else '<'} 15) -> "
+             f"{'crossing' if ok else 'compound'}")
+    else:
+        s = f"{n} arms -> compound"
+    if J["r"] >= cfg.compound_r and J["geom"] != "compound":
+        s += f"; radius {J['r']:.0f} >= {cfg.compound_r:g} px -> compound"
+    return s
+
+
+def fig_step7(ctx, out, st):
+    plt = _plt()
+    cfg = ctx["cfg"]
+    x0, y0 = ctx["win"]
+    cx, cy = x0 + Z / 2, y0 + Z / 2
+    picks = []
+    for typ in ("pseudo-T", "crossing", "compound"):
+        js = [J for J in st["juncs"] if J["geom"] == typ and J["type"] == typ and J["r"] < 14]
+        if typ == "compound":
+            js = [J for J in st["juncs"] if J["type"] == "compound" and len(J["arms"]) >= 5] or js
+        picks.append(min(js, key=lambda J: math.hypot(J["x"] - cx, J["y"] - cy)))
+    fig, axs = plt.subplots(1, 3, figsize=(18, 6.6), layout="constrained")
+    cm = plt.get_cmap("tab10")
+    for ax, J in zip(axs, picks):
+        c = np.array([J["x"], J["y"]])
+        half = int(max(22, J["r"] + 16))
+        _patch(ax, ctx["img"].astype(float), c[0], c[1], half)
+        for t in st["traces"]:
+            ax.plot(t["xy"][:, 0], t["xy"][:, 1], "-", color="#ffffff", lw=0.8, alpha=0.5)
+        col = {tid: cm(i % 10) for i, tid in enumerate(J["tids"])}
+        for tid in J["tids"]:
+            P = st["traces"][tid]["xy"]
+            ax.plot(P[:, 0], P[:, 1], "-", color=col[tid], lw=2.2)
+        E = next(E for cc, R, E in st["clusters"] if math.hypot(cc[0] - c[0], cc[1] - c[1]) < 1e-6)
+        for e in E:
+            mk, mc = ("^", "#ff9f1c") if e["kind"] == "T" else ("X", "#ff2bd6")
+            ax.plot(*e["p"], mk, ms=11, mfc=mc, mec="k", mew=0.8)
+        ax.add_patch(plt.Circle(c, J["r"], fill=False, ec="w", ls="--", lw=1.5))
+        for tid, side, u, L, _ in J["arms"]:
+            ax.annotate("", xy=c + u * (J["r"] + 9), xytext=c, arrowprops=dict(arrowstyle="->", color=col[tid], lw=2.2))
+            ax.annotate(f"{L:.0f} px", c + u * (J["r"] + 12), color="w", fontsize=8, ha="center", va="center",
+                        bbox=dict(boxstyle="round,pad=0.15", fc="k", alpha=0.6, lw=0))
+        ax.plot(*c, "+", color="w", ms=12, mew=2)
+        n_t = sum(e["kind"] == "T" for e in E)
+        ax.set_title(f"{J['type']} at ({c[0]:.0f}, {c[1]:.0f}): {n_t} T and {len(E) - n_t} X events, radius "
+                     f"{J['r']:.1f} px\n{_decision(J, cfg)}", fontsize=9, loc="left")
+    fig.suptitle("Step 7, how it works: events (orange triangle = a trace ends on another, a 'T'; magenta cross = two "
+                 "traces cross, an 'X') are grouped into one junction (white disc).\nThe traces leaving the disc are "
+                 "its arms (arrows; the number is the arm's length), and the number of arms and how they pair decide "
+                 "the type", fontsize=12, x=0.01, ha="left")
+    _save(fig, out, "mech7_junctions.jpg")
+    return [(J["type"], round(J["x"]), round(J["y"]), len(J["arms"])) for J in picks]
+
+
+def fig_step8(ctx, out, st):
+    plt = _plt()
+    cfg = ctx["cfg"]
+    g = st["gains"] / st["cost"]
+    v = st["cnr"] / cfg.cnr_min
+    fr, kp = st["free"], st["keep"]
+    fig, axs = plt.subplots(1, 2, figsize=(16, 5.6), layout="constrained", gridspec_kw=dict(width_ratios=[1.1, 1]))
+    ax = axs[0]
+    clip = lambda a: np.clip(a, 1e-3, 1e4)                                          # noqa: E731
+    ax.scatter(clip(g[~fr]), clip(v[~fr]), s=14, color="#bbbbbb", label="edge between two junctions (never removed)")
+    ax.scatter(clip(g[fr & kp]), clip(v[fr & kp]), s=22, color="#1f77b4", label="free-end edge, kept")
+    ax.scatter(clip(g[fr & ~kp]), clip(v[fr & ~kp]), s=40, color="#d62728", marker="x", label="free-end edge, removed")
+    ax.axvline(1, color="k", lw=1, ls="--")
+    ax.axhline(1, color="k", lw=1, ls="--")
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("test 1, pays for itself: gain / cost  (gain = weighted squared error it removes; cost = "
+                  f"{cfg.mdl_k:g} (1 + length / {cfg.mdl_len:g}))", fontsize=9)
+    ax.set_ylabel(f"test 2, visible: contrast-to-noise / {cfg.cnr_min:g}", fontsize=9)
+    ax.legend(fontsize=8, frameon=False, loc="lower right")
+    ax.set_title(f"every edge of the first round ({len(g)}): a free-end edge must pass both tests (upper right); "
+                 f"{int((fr & ~kp).sum())} removed", fontsize=9, loc="left")
+    # the removed edges on the image, with their reason
+    ax = axs[1]
+    ax.imshow(ctx["gray"], cmap="gray", vmin=0, vmax=1)
+    for e, k in zip(st["edges"], kp):
+        ax.plot(e["xy"][:, 0], e["xy"][:, 1], "-", color="#1f77b4" if k else "#d62728", lw=1.0 if k else 2.2)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title("kept (blue) and removed (red) edges", fontsize=9, loc="left")
+    fig.suptitle("Step 8, how it works: render all edges, then remove, one at a time, the free-end edge that fails "
+                 "a test worst, re-scoring its neighbours (values shown are before any removal)", fontsize=12,
+                 x=0.01, ha="left")
+    _save(fig, out, "mech8_prune.jpg")
+    return dict(n=len(g), free=int(fr.sum()), removed=int((~kp).sum()),
+                fail_gain=int((fr & (g < 1)).sum()), fail_cnr=int((fr & (v < 1)).sum()))
+
+
+# ---------------------------------------------------------------------------------------------- steps 9-12
+def fit_run(ctx):
+    """The pipeline's spline fit on the example image, with every optimisation stage's loss history recorded
+    (fit.optimize wrapped; nothing else changes)."""
+    from experiments.splinefit import fit as F
+    from experiments.splinefit import pipeline as P
+    hists = []
+    orig = F.optimize
+
+    def rec(*a, **k):
+        h = orig(*a, **k)
+        hists.append(dict(iters=a[1] if len(a) > 1 else k.get("iters"), fit_pos=k.get("fit_pos", True), hist=h))
+        return h
+    F.optimize = rec
+    try:
+        dbg = {}
+        outp = P.annotate_cfg(ctx["img"].copy(), ctx["valid"].copy(), P.DEFAULT, debug=dbg)
+    finally:
+        F.optimize = orig
+    return dict(out=outp, dbg=dbg, hists=hists)
+
+
+def fig_step9(ctx, out, fr):
+    from experiments.splinefit.proposals import build_network
+    plt = _plt()
+    dbg = fr["dbg"]
+    prop = dbg["proposal"]
+    net0, info = build_network(prop, ctx["s1"]["OD"].shape)
+    x0, y0 = ctx["win"]
+    cx, cy = x0 + Z / 2, y0 + Z / 2
+    picks = []
+    for want in ("crossing", "node"):
+        best = None
+        for ji, J in enumerate(prop["junctions"]):
+            ends = sum((e["j"][0] == ji) + (e["j"][1] == ji) for e in prop["edges"])
+            if want == "crossing" and not (J["type"] == "crossing" and ends == 4):
+                continue
+            if want == "node" and not (J["type"] != "crossing" and ends >= 3):
+                continue
+            d = math.hypot(J["x"] - cx, J["y"] - cy)
+            if best is None or d < best[0]:
+                best = (d, J)
+        picks.append(best[1])
+    fig, axs = plt.subplots(2, 2, figsize=(12, 12.4), layout="constrained")
+    cm = plt.get_cmap("tab10")
+    for r, J in enumerate(picks):
+        half = int(max(26, J["r"] + 18))
+        for c, what in enumerate(("proposal", "network")):
+            ax = axs[r, c]
+            _patch(ax, ctx["img"].astype(float), J["x"], J["y"], half)
+            if what == "proposal":
+                k = 0
+                for e in prop["edges"]:
+                    P_ = np.asarray(e["xy"])
+                    if np.min(np.hypot(P_[:, 0] - J["x"], P_[:, 1] - J["y"])) > half * 1.4:
+                        continue
+                    ax.plot(P_[:, 0], P_[:, 1], "-", color=cm(k % 10), lw=2.2)
+                    ax.plot(*P_[0], "o", color=cm(k % 10), ms=5, mec="k")
+                    ax.plot(*P_[-1], "o", color=cm(k % 10), ms=5, mec="k")
+                    k += 1
+                ax.add_patch(plt.Circle((J["x"], J["y"]), J["r"], fill=False, ec="w", ls="--", lw=1.2))
+                ax.set_title(f"proposal: a {J['type']} junction; edges stop at it (dots = ends)", fontsize=9, loc="left")
+            else:
+                k = 0
+                for eid in net0.edges:
+                    smp = net0.sample(eid, 1.0)
+                    P_ = smp["xy"]
+                    if np.min(np.hypot(P_[:, 0] - J["x"], P_[:, 1] - J["y"])) > half * 1.4:
+                        continue
+                    ax.plot(P_[:, 0], P_[:, 1], "-", color=cm(k % 10), lw=2.2)
+                    ctrl = net0.edges[eid].ctrl
+                    ax.plot(ctrl[:, 0], ctrl[:, 1], "o", color=cm(k % 10), ms=4, mec="k", mew=0.4)
+                    k += 1
+                for nid, nd in net0.nodes.items():
+                    if abs(nd.x - J["x"]) <= half and abs(nd.y - J["y"]) <= half:
+                        ax.plot(nd.x, nd.y, "o", ms=13, mfc="none", mec="w", mew=2)
+                ax.set_title("spline network (dots = control points, ring = node)", fontsize=9, loc="left")
+    fig.suptitle("Step 9, how it works: at a crossing the four ends pair into two continuous curves and no node is "
+                 "made;\nat a fork the parent vessel continues through the node and the branch ends on it",
+                 fontsize=12, x=0.01, ha="left")
+    _save(fig, out, "mech9_network.jpg")
+    return [(J["type"], round(J["x"]), round(J["y"])) for J in picks]
+
+
+def fig_step10(ctx, out, fr):
+    import torch
+    from experiments.splinefit import fit as F
+    from experiments.splinefit import pipeline as P
+    plt = _plt()
+    dbg, outp = fr["dbg"], fr["out"]
+    model, net = dbg["model"], dbg["net"]
+    T = np.asarray(outp["od_target"], np.float32)
+    with torch.no_grad():
+        Rj = model.optical_density().numpy()
+        kap = float(model.kappa())
+        madd = F.make_model(net, T, dbg["weight"], replace(P.DEFAULT.fit, junctions=False), kap)
+        Ra = madd.optical_density().numpy()
+    picks = []
+    for kind in ("node", "cross"):
+        H, W = T.shape
+        si = [q for q in model.site_info if q["kind"] == kind and len(q["edges"]) == (3 if kind == "node" else 2)
+              and len(q["centres"]) == 1 and 30 <= q["x"] < W - 30 and 30 <= q["y"] < H - 30]
+        if kind == "node":                             # the fork where the union changes the render most
+            best = max(si, key=lambda q: float(np.abs(Rj - Ra)[int(q["y"]) - 2:int(q["y"]) + 3,
+                                                                int(q["x"]) - 2:int(q["x"]) + 3].max()))
+        else:                                          # the most visible crossing (target OD at its centre)
+            best = max(si, key=lambda q: float(T[int(round(q["y"])), int(round(q["x"]))]))
+        picks.append(best)
+        print(kind, "sites", len(si))
+    v = float(np.percentile(T[ctx["valid"]], 99.5))
+    fig, axs = plt.subplots(2, 4, figsize=(18, 9.6), layout="constrained")
+    for r, q in enumerate(picks):
+        half = int(min(max(18, q["reach"] + 8), 36))
+        for c, (img, cmap, lo, hi, ttl) in enumerate((
+                (T, "gray_r", 0, v, "the target OD"),
+                (Ra, "gray_r", 0, v, "plain sum of the edges"),
+                (Rj, "gray_r", 0, v, "the junction-aware render (what is fitted)"),
+                (Rj - Ra, "RdBu_r", -v / 3, v / 3, "junction-aware minus plain sum"))):
+            ax = axs[r, c]
+            ax.imshow(img, cmap=cmap, vmin=lo, vmax=hi, interpolation="nearest")
+            ax.set_xlim(q["x"] - half, q["x"] + half)
+            ax.set_ylim(q["y"] + half, q["y"] - half)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            ax.set_title(f"{'fork (node)' if q['kind'] == 'node' else 'crossing'}: {ttl}", fontsize=9, loc="left")
+        yc, xc = int(round(q["y"])), int(round(q["x"]))
+        axs[r, 3].set_xlabel(f"at the centre: target {T[yc, xc]:.3f}, plain sum {Ra[yc, xc]:.3f}, junction-aware "
+                             f"{Rj[yc, xc]:.3f} OD", fontsize=9)
+        print(q["kind"], "centre T, Ra, Rj", round(float(T[yc, xc]), 3), round(float(Ra[yc, xc]), 3),
+              round(float(Rj[yc, xc]), 3))
+    fig.suptitle(f"Step 10, how it works: at a fork (top) the plain sum double-counts where the lumens overlap and the "
+                 f"union removes it (blue);\nat a crossing (bottom) the overlap is reduced by (1 - kappa), kappa = "
+                 f"{kap:.2f} here", fontsize=12, x=0.01, ha="left")
+    _save(fig, out, "mech10_junction_render.jpg")
+    return dict(kappa=kap, sites=[(q["kind"], round(q["x"]), round(q["y"])) for q in picks])
+
+
+def fig_step12(ctx, out, fr):
+    plt = _plt()
+    hs, log = fr["hists"], fr["dbg"]["log"]
+    names = ("1. profiles and optics only (geometry fixed)", "2. everything, positions anchored", "4. profiles again, "
+             "on the retargeted target")
+    fig, axs = plt.subplots(1, 2, figsize=(17, 5.0), layout="constrained", gridspec_kw=dict(width_ratios=[1.6, 1]))
+    ax = axs[0]
+    off = 0
+    cols = ("#1f77b4", "#d62728", "#2ca02c")
+    for i, h in enumerate(hs):
+        arr = np.array(h["hist"])
+        it = off + np.arange(len(arr))
+        ax.plot(it, arr[:, 1], "-", color=cols[i % 3], lw=2, label=(names[i] + ": data error") if i < 3 else None)
+        ax.plot(it, arr[:, 0], ":", color=cols[i % 3], lw=1.2, label="... plus the priors" if i == 0 else None)
+        off += len(arr)
+        if i == 1:
+            pr = next((q for q in log if "prune" in q), None)
+            ax.axvline(off - 0.5, color="k", lw=1)
+            ax.annotate(f"3. prune: {pr['prune']} edges removed, then retarget", (off, float(arr[:, 0].max())),
+                        fontsize=8, rotation=90, va="top", ha="right")
+    ax.set_yscale("log")
+    ax.set_xlabel("iteration")
+    ax.set_ylabel("loss (log scale)")
+    ax.legend(fontsize=8, frameon=False, loc="upper right")
+    ax.set_title("data error = 0.5 sum w (OD - R)^2. Small bumps every 25 iterations: pixels re-assigned to edges. "
+                 "Stage 4 fits a new target", fontsize=9, loc="left")
+    ax = axs[1]
+    lr = [0.5 * (1 + math.cos(math.pi * i / 100)) * 0.9 + 0.1 for i in range(100)]
+    ax.plot(np.arange(100), lr, color="k", lw=2)
+    ax.set_xlabel("iteration within a stage (here 100)")
+    ax.set_ylabel("learning-rate factor")
+    ax.set_title("each stage's step size decays from 1 to 0.1 on a cosine", fontsize=9, loc="left")
+    fig.suptitle("Steps 11-12, how it works: gradient descent (Adam) on the loss, in stages", fontsize=12, x=0.01,
+                 ha="left")
+    _save(fig, out, "mech12_fit.jpg")
+    return [(h["iters"], round(h["hist"][0][1]), round(h["hist"][-1][1])) for h in hs]
+
+
 def run(scene_dir: str, mask_scene_dir: str, out: str, only=None):
     from experiments.splinefit import fastset as FS
     FS.check_not_heldout(scene_dir)
@@ -515,11 +954,21 @@ def run(scene_dir: str, mask_scene_dir: str, out: str, only=None):
     info = {}
     figs = dict(step1=lambda: fig_step1(ctx, out), leak=lambda: fig_leak(mask_scene_dir, out),
                 step2=lambda: fig_step2(ctx, out), step3=lambda: fig_step3(ctx, out),
-                step4=lambda: fig_step4(ctx, out, _pixels(ctx)), step5=lambda: fig_step5(ctx, out))
+                step4=lambda: fig_step4(ctx, out, _pixels(ctx)), step5=lambda: fig_step5(ctx, out),
+                step6=lambda: fig_step6(ctx, out, _pixels(ctx)))
     for name, f in figs.items():
         if only and name not in only:
             continue
         info[name] = f()
+    if not only or {"step7", "step8"} & set(only):
+        st = stage78(ctx)
+        info["step7"] = fig_step7(ctx, out, st)
+        info["step8"] = fig_step8(ctx, out, st)
+    if not only or {"step9", "step10", "step12"} & set(only):
+        fr = fit_run(ctx)
+        info["step9"] = fig_step9(ctx, out, fr)
+        info["step10"] = fig_step10(ctx, out, fr)
+        info["step12"] = fig_step12(ctx, out, fr)
     return info
 
 
