@@ -50,15 +50,52 @@ class Config:
                                     # Off (discarded): tier 1 -0.0009; a cross-trace link made two false texture
                                     # pieces one edge that the prune then kept (line_d6_h0.25)
     step: float = 0.5               # px, sample spacing of the exported edges
+    od_mask: str = ""               # E24 (batch 9): the background is also fitted outside a hysteresis mask of the
+                                    # cleaned OD (continuity.od_mask, 1 px and smoothed 3 px; REPORT section 8,
+                                    # change 1). "" off; "retarget": only the retarget's mask; "target": the fit's
+                                    # target from the start (proposals unchanged); "stage1": the proposer's stage 1
+                                    # too (photoreceptors extra=), so everything downstream sees the cleaner OD
 
 
 DEFAULT = Config()
 
 
+def od_bg_mask(s1: dict, valid: np.ndarray) -> np.ndarray:
+    """E24: hysteresis masks of stage 1's cleaned OD (seeds above 3, grown above 1.5 x the noise), at the pixel
+    scale and smoothed 3 px (continuity.od_mask): the vessels the CNR mask misses, faint and wide ones."""
+    from .continuity import od_mask
+    OD, bg = np.asarray(s1["OD"], np.float32), np.asarray(s1["bg"], bool)
+    return od_mask(OD, valid, bg) | od_mask(OD, valid, bg, smooth=3.0)
+
+
+def refit_outside(s1: dict, extra: np.ndarray) -> dict:
+    """Stage 1's B re-fitted (neuromimetic _masked_mean, sigma bg_sigma) on the valid pixels outside its mask
+    OR extra; OD = B - log I. Returns a copy of s1 with B, OD, mask and bg replaced."""
+    from experiments.neuromimetic import neuromimetic as N
+    from scipy import ndimage as ndi
+    M = np.asarray(s1["mask"], bool) | extra
+    ok = np.asarray(s1["ok"], bool)
+    B = N._masked_mean(s1["L"], ok & ~M, N.DEFAULT.bg_sigma)
+    OD = np.where(ok, B - s1["L"], 0.0).astype(np.float32)
+    if not ok.all():
+        iy, ix = ndi.distance_transform_edt(~ok, return_distances=False, return_indices=True)
+        OD = OD[iy, ix]
+    return dict(s1, B=B, OD=OD, mask=M, bg=ok & ~M)
+
+
 def _propose(image, valid, cfg: Config):
     from experiments.neuromimetic import neuromimetic as N
     dbg = {}
-    N.run(image, valid, replace(N.DEFAULT, verify=cfg.nm_verify), debug=dbg)
+    ncfg = replace(N.DEFAULT, verify=cfg.nm_verify)
+    if cfg.od_mask == "stage1":                        # E24: stages 1-8 on the OD cleaned by the larger mask
+        s1 = N.photoreceptors(image, valid, ncfg)
+        s1 = N.photoreceptors(image, valid, ncfg, extra=od_bg_mask(s1, valid))
+        traces = N._channel_traces(s1["OD"], s1["bg"], s1["ok"], ncfg)
+        s1["rms"] = N.ganglion_cells(s1["OD"], s1["bg"], ncfg)["rms"]
+        pr = dict(s1=s1, chans=None, traces=N.merge_channels(traces, ncfg, shape=s1["OD"].shape))
+        N.run(image, valid, ncfg, debug=dbg, proposal=pr)
+    else:
+        N.run(image, valid, ncfg, debug=dbg)
     s1 = dbg["s1"]
     sig2 = dbg.get("sig2")
     return dbg, s1, sig2
@@ -114,10 +151,15 @@ def annotate_cfg(image: np.ndarray, valid: np.ndarray, cfg: Config = DEFAULT, de
     image = np.asarray(image, np.float32)
     valid = np.asarray(valid, bool)
     dbg, s1, sig2 = _propose(image, valid, cfg)
-    s1c = s1                        # the retarget's stage 1 (the coarse ridges in its mask)
+    if cfg.od_mask not in ("", "retarget", "target", "stage1"):
+        raise ValueError(f"Config.od_mask must be '', 'retarget', 'target' or 'stage1', not {cfg.od_mask!r}")
+    if cfg.od_mask in ("retarget", "target"):          # E24: the fit's stage 1 with the OD mask in its mask
+        s1o = refit_outside(s1, od_bg_mask(s1, valid))
+        s1 = s1o if cfg.od_mask == "target" else s1
+    s1c = s1o if cfg.od_mask == "retarget" else s1     # the retarget's stage 1 (the coarse ridges in its mask)
     if cfg.coarse:
         from .coarse import coarse_stage1
-        s1c = coarse_stage1(s1)
+        s1c = coarse_stage1(s1c)
     OD = s1["OD"].astype(np.float32)
     w = precision(OD, s1["ok"], s1["bg"], sig2)
     t1 = time.time()
@@ -203,6 +245,21 @@ def annotate(image, valid):
 def annotate_mask(image, valid):
     """E23 (batch 8): the binary-mask term on top of the OD match (FitConfig.mask_w = 1), continuity off."""
     return annotate_cfg(image, valid, replace(DEFAULT, continuity=False, fit=replace(DEFAULT.fit, mask_w=1.0)))
+
+
+def annotate_odmask_retarget(image, valid):
+    """E24: the OD hysteresis mask in the retarget's background mask only."""
+    return annotate_cfg(image, valid, replace(DEFAULT, od_mask="retarget"))
+
+
+def annotate_odmask_target(image, valid):
+    """E24: the fit's target from a background fitted outside stage 1's mask OR the OD hysteresis mask."""
+    return annotate_cfg(image, valid, replace(DEFAULT, od_mask="target"))
+
+
+def annotate_odmask_stage1(image, valid):
+    """E24: the proposer's stage 1 with the OD hysteresis mask, everything downstream on its OD."""
+    return annotate_cfg(image, valid, replace(DEFAULT, od_mask="stage1"))
 
 
 def annotate_mask_first(image, valid):

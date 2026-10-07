@@ -1468,3 +1468,47 @@ R2 baseline: 0.792582 (fast 0.707579, probes 0.877585). Nothing kept; the pipeli
    is the right tool, used for the background rather than as a fit target: the next experiment fits the
    background outside an OD-derived vessel mask (the residual rule unchanged: B on the negative of a vessel
    mask, the target the image's own OD).
+
+## Batch 9: E24, the background fitted outside an OD-derived vessel mask
+
+The user's request: run REPORT section 8's change 1 through the full fit. Batch 8 found the background leak's
+mechanism: stage 1's vesselness (CNR) mask holds 46 % of the pathologic dev scene's lumen and 37 % of its wide
+vessels', so B is fitted on the vessels it misses and the target loses their OD.
+
+**Scale grid first (a question from the user, no fit).** A near-continuous scale grid does not change the CNR
+mask: 4 bands per octave (21 bands, 1-32 px) and 25 bands (1-64 px) against the 6 octave bands, over the 5 dev
+averages, cover 77 / 77 / 78 % of the true lumen and the target keeps 72 / 72 / 72 % of the true vessel OD.
+Analytically (a Gaussian ridge, power-law background spectrum) the best scale is c(beta) x the ridge width
+(c = 1.66, 1.01, 0.69 for beta = 1, 2, 3; no optimum in white noise) and octave bands lose at most 5-8 % of the
+CNR. The leak is not a scale-sampling problem: wide faint vessels stay under CNR 2 at every scale.
+
+**The mask, at the target (no fit).** Pipeline.od_bg_mask: continuity.od_mask (hysteresis on the cleaned OD,
+seeds 3 x noise, grown at 1.5 x) at 1 px OR smoothed 3 px, added to stage 1's mask; B re-fitted on the rest
+(sigma 8). Over the dev averages the target keeps 81.6 % of the true vessel OD (72 % now; 86 % when stage 1
+itself iterates with it), pathologic 55-60 % (41 %). Cost: on empty background (true OD < 0.003, > 6 px from
+any vessel) the target sits at +0.0020 OD (now -0.0005), sd 0.0061 (0.0044): the mask takes the dark half of
+the background texture too, and B, fitted on the brighter rest, is biased up.
+
+**The fit (tier 2, the 5 dev averages, x1 each, two scene groups run in parallel; paired per scene vs R2).**
+The baseline re-run reproduced every R2 image's digest.
+
+| variant (Config.od_mask) | composite | paired vs R2 | up / down | verdict |
+|---|---|---|---|---|
+| R2 (current) | 0.766486 | - | - | - |
+| retarget: the OD mask in the retarget's mask only | 0.769035 | +0.0025 +- 0.0014, t 1.86 | 3 / 0 | not confirmed; guards veto (blur_err +0.059, contrast_bias +0.060, blur_bias) |
+| target: the fit's target from the start, proposals unchanged | 0.753450 | -0.0130 +- 0.0049, t -2.68 | 0 / 5 | regress |
+| stage1: the proposer's stage 1 too | 0.734345 | -0.0321 +- 0.0127, t -2.54 | 0 / 4 | regress |
+
+Every variant raises explained OD (+0.008, +0.024, +0.034) and every one biases the contrasts up (contrast_bias
++0.06, +0.21, +0.30) and the blurs: the fit absorbs B's upward offset as darker, wider vessels. Entering before
+the joint fit, the changed target also drags the geometry (pos -0.074 / -0.089 on every scene, centreline F1
+-0.016 / -0.020), E1's lesson; in the proposer it costs the types most (coarse type -0.073, pathologic -0.25).
+
+**A symmetric mask does not remove the bias** (target level): also excluding the texture's bright excursions
+(od_mask on -OD) flips it to -0.0014 and leaves 17 % of the pixels for B (36 % with the OD mask, 59 % now), and
+the target keeps 77.4 %. The texture is strong enough that a hysteresis at 1.5 x its noise takes most of the image.
+
+**Outcome.** Config.od_mask stays off (""); the three variants stay in pipeline.py for re-tests. What the mask
+needs is a way to take the vessels without the texture: a line-like (oriented, elongated) criterion, e.g. stage
+3's coarse orientation score or the traced lumens, rather than OD amplitude alone; or a background model that
+does not take its level from whichever pixels the mask leaves.
