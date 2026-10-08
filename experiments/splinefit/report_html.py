@@ -40,6 +40,7 @@ th, td { border: 1px solid var(--rule); padding: 4px 8px; text-align: left; whit
 th { background: var(--head); }
 td:first-child, th:first-child { white-space: normal; min-width: 9em; }
 td:last-child, th:last-child { white-space: normal; min-width: 12em; }
+td.long { white-space: normal; min-width: 14em; }
 figure { margin: 1em 0 0.4em; }
 figure img { display: block; width: 100%; height: auto; border-radius: 4px; background: #fff; }
 p.caption, p > em:only-child { color: var(--cap); }
@@ -87,6 +88,10 @@ def build(md_path: str, out_path: str):
                   body)
     body = re.sub(r"<p><em>(.*?)</em></p>", r'<p class="caption"><em>\1</em></p>', body, flags=re.S)
     body = body.replace("<table>", '<div class="table-wrap"><table>').replace("</table>", "</table></div>")
+    # long cells wrap wherever they are (short numeric cells keep nowrap)
+    body = re.sub(r"<td>(.*?)</td>", lambda m: (f'<td class="long">{m.group(1)}</td>'
+                                                if len(re.sub(r"<[^>]+>", "", m.group(1))) > 40 else m.group(0)),
+                  body, flags=re.S)
     # links to other markdown files of the repo are not part of this page: keep their text only
     body = re.sub(r'<a href="(?!https?:)[^"]*">(.*?)</a>', r"\1", body)
     page = (f"<!doctype html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
