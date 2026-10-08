@@ -104,7 +104,8 @@ does both.
 ok = valid & (I > 0) & (I < 4095)                  # empty or saturated pixels are not data
 L  = ln(I) on ok pixels; elsewhere copy L from the nearest ok pixel
 
-# A first guess of the background: an "upper envelope" that fills every dark line narrower than 60 px
+# A first guess of the background: an "upper envelope" that fills every dark line narrower than the
+# closing disc (radius 60 px, so up to about 120 px wide)
 B = upper_envelope(L, radius=60)
 OD = B - L
 S  = blur(OD, 1)
@@ -152,7 +153,7 @@ local_rms(D, bg, window):          # the typical size of D near each pixel, meas
 
 | setting | value | what it controls |
 |---|---|---|
-| closing radius | 60 px | the widest dark structure the first guess fills in |
+| closing radius | 60 px | the first guess fills dark structures up to about twice this (the disc's width) |
 | mask threshold | Z > 2, or OD > 3 x noise | what counts as vessel |
 | mask dilation | 2 px | margin around the mask, so vessel edges do not leak into B |
 | background sigma | 8 px | how locally B follows the illumination |
