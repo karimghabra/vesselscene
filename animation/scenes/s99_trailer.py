@@ -1,4 +1,4 @@
-"""The very short cut: the whole spec in about 90 seconds.
+"""The very short cut: the whole spec in about 75 seconds.
 
 One beat per idea: the goal on a vesselscene burst, the junction problem,
 the two modes of vision, V1's hypercolumn, V2's junction cells, fork
@@ -179,6 +179,7 @@ class Trailer(ChapterScene):
         rec = [k for k in m.boxes if k not in FEEDFORWARD and k != "motion"]
         self.play(LaggedStart(*[Indicate(m.boxes[k][0], color=WHITE, scale_factor=1.06) for k in rec], lag_ratio=0.08), run_time=1.6)
         self.play(*[ShowPassingFlash(a.copy().set_stroke(FB, width=8), time_width=0.6) for a in m.feedback], run_time=1.4)
+        self.wait(1.2)
         self.play(FadeOut(m), run_time=0.6)
 
         # ------------------------------------------------ 4. V1: a hypercolumn
@@ -293,7 +294,7 @@ class Trailer(ChapterScene):
         self.wait(2.5)
         self.unsay()
         title = Tex(r"Recurrent mid-level vision for the vessel annotator").scale(0.95)
-        sub = Tex(r"the 90-second version", color=FB).scale(0.6)
+        sub = Tex(r"the very short version", color=FB).scale(0.6)
         tg = VGroup(title, sub).arrange(DOWN, buff=0.25)
         back = BackgroundRectangle(tg, color=BLACK, fill_opacity=0.75, buff=0.35)
         self.play(avg2.animate.set_opacity(0.35), runs2.animate.set_stroke(opacity=0.35), rings2.animate.set_stroke(opacity=0.35),
