@@ -6,8 +6,9 @@
     python versions.py render all -j 3           # every cut, 3 scenes at a time
 
 Final quality is 1920x1080 at 30 fps.  Each chapter is a scene variant
-(<Base>Short / Medium / Detailed); a cut is its title card, its chapters
-in order, and the end card, joined with ffmpeg without re-encoding.
+(<Base>Short / Medium / Detailed); a cut is its chapters in order (the
+cold open carries the title) and its end card, joined with ffmpeg without
+re-encoding.  The very short cut is the trailer alone.
 """
 from __future__ import annotations
 
@@ -48,7 +49,6 @@ CUTS = {
     "medium": dict(level=2, chapters=[0, 1, 2, 4, 7, 8, 9, 10, 11, 14, 16, 18]),
     "detailed": dict(level=3, chapters=list(range(19))),
 }
-CARD_NAME = {"very_short": "VeryShort", "short": "Short", "medium": "Medium", "detailed": "Detailed"}
 
 
 def scenes(cut: str) -> list[tuple[str, str]]:
@@ -56,9 +56,8 @@ def scenes(cut: str) -> list[tuple[str, str]]:
     c = CUTS[cut]
     if c["level"] is None:
         return [("s99_trailer.py", "Trailer")]
-    out = [("s_cards.py", f"Title{CARD_NAME[cut]}")]
-    out += [(CHAPTERS[n][0], CHAPTERS[n][1] + LEVEL_SUFFIX[c["level"]]) for n in c["chapters"]]
-    out.append(("s_cards.py", "EndCard"))
+    out = [(CHAPTERS[n][0], CHAPTERS[n][1] + LEVEL_SUFFIX[c["level"]]) for n in c["chapters"]]
+    out.append(("s_cards.py", "End" + LEVEL_SUFFIX[c["level"]]))
     return out
 
 

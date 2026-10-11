@@ -62,6 +62,30 @@ class VSScene:
         out[~ok] = 1.0
         return out
 
+    def burst_views(self, lo_pct=1.0, hi_pct=99.7):
+        """The burst's frames for display, all on the average's grey scale
+        (so the flicker is the red cells, not a per-frame contrast stretch)."""
+        if self.burst is None:
+            return []
+        from scipy.ndimage import gaussian_filter
+
+        def flat(img):
+            I = np.asarray(img, float)
+            ok = np.isfinite(I) & (I > 0)
+            L = np.where(ok, np.log(np.where(ok, I, 1.0)), 0.0)
+            w = gaussian_filter(ok.astype(float), 40) + 1e-9
+            return L - gaussian_filter(np.where(ok, L, 0.0), 40) / w, ok
+
+        Fa, oka = flat(self.average)
+        lo, hi = np.percentile(Fa[oka], [lo_pct, hi_pct])
+        out = []
+        for f in self.burst:
+            F, ok = flat(f)
+            v = np.clip((F - lo) / (hi - lo), 0, 1)
+            v[~ok] = 1.0
+            out.append(v)
+        return out
+
 
 @lru_cache(maxsize=None)
 def load(tag: str = DEFAULT) -> VSScene:
@@ -98,11 +122,12 @@ def runs_overlay(truth, pf, min_len_px=25, width=2.5, by="identity"):
     return g
 
 
-def junctions_overlay(truth, pf, width=2.5, min_radius_px=6.0):
-    """A ring per observable junction, coloured by its observable type."""
+def junctions_overlay(truth, pf, width=2.0, min_radius_px=6.0, max_radius_px=11.0):
+    """A ring per observable junction, coloured by its observable type (the
+    radius clipped, so large compound regions do not swamp the picture)."""
     g = VGroup()
     for j in truth["junctions"]:
         col = JUNCTION_COLORS.get(j["type_observable"], JUNC)
-        r = max(j["radius"], min_radius_px) * pf.unit
+        r = float(np.clip(j["radius"], min_radius_px, max_radius_px)) * pf.unit
         g.add(Circle(radius=r, stroke_color=col, stroke_width=width).move_to(pf.point(j["x"], j["y"])))
     return g
