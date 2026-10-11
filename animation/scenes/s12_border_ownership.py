@@ -545,7 +545,7 @@ class BorderOwnership(ChapterScene):
         head = Tex(r"measured, real test image (spec 4.9b)", color=GREY_B).scale(0.48)
         tb = VGroup(head, tbl).arrange(DOWN, buff=0.18).move_to([3.55, 1.6, 0])
         self.say(r"On the real test image (spec 4.9b), fusion adds 16,907 px of centreline on faint vessels:"
-                 r" median OD 0.04 under them, not 0.10.")
+                 r" median OD 0.04, against 0.10 under the old centreline.")
         self.play(FadeIn(tb), run_time=1.0)
         self.wait(2.0)
         pieces = SurroundingRectangle(VGroup(*cells[6:9]), color=INH, buff=0.07)

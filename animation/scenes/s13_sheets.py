@@ -303,9 +303,9 @@ class Sheets(ChapterScene):
             mid = DashedLine(ax.c2p(0, 0), ax.c2p(0, 80), stroke_color=MUTED, stroke_width=1.5)
             bt = Tex(r"across the faint vessel, 5 px from the crossing").scale(0.48).next_to(ax, UP, buff=0.25)
             l1 = Tex(r"collapsed: no crest here,\\it climbs to the strong vessel", color=orientation_color(N.THETAS[k_s])).scale(0.42)
-            l1.move_to(ax.c2p(-6.8, 68), aligned_edge=LEFT)
+            l1.move_to(ax.c2p(-7.4, 76), aligned_edge=LEFT)
             l2 = Tex(r"its own sheet: a crest", color=orientation_color(N.THETAS[k_f])).scale(0.42)
-            l2.next_to(crest, LEFT, buff=0.25).shift(DOWN * 0.15)
+            l2.next_to(crest, LEFT, buff=0.55).shift(DOWN * 0.05)
             xl = Tex(r"faint vessel's centre", color=MUTED).scale(0.38).next_to(ax.c2p(0, 0), DOWN, buff=0.1).align_to(ax.c2p(0, 0), RIGHT)
             xr = Tex(r"strong one $\rightarrow$", color=MUTED).scale(0.38).next_to(ax.c2p(7, 0), DOWN, buff=0.1).align_to(ax, RIGHT)
             self.say(r"Why: across the faint vessel near the crossing, the best value per pixel climbs toward the strong vessel,"
