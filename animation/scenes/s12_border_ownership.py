@@ -127,11 +127,18 @@ class BorderOwnership(ChapterScene):
         h = P["hhw"]
         cols["v"]["arrows"] = arrows(cols["v"], [(-h, 1, RIGHT_OWN), (h, -1, LEFT_OWN)])
         cols["s"]["arrows"] = arrows(cols["s"], [(0.0, 1, RIGHT_OWN)])
-        self.play(LaggedStart(*[FadeIn(a, shift=RIGHT * 0.1) for a in cols["v"]["arrows"]]), run_time=1.2)
-        self.say(r"A vessel is a dark strip: it owns both of its borders.", wait=0.6)
-        self.play(LaggedStart(*[FadeIn(a, shift=RIGHT * 0.1) for a in cols["s"]["arrows"]]), run_time=0.8)
-        self.say(r"A single edge, such as a glare border or the aperture's rim, owns only one."
-                 r" Yet line cells answer to both.", wait="read")
+        if self.short:
+            self.say(r"A vessel is a dark strip that owns both of its borders. A glare edge owns only one,"
+                     r" yet line cells answer to both.")
+            self.play(LaggedStart(*[FadeIn(a, shift=RIGHT * 0.1) for a in (*cols["v"]["arrows"], *cols["s"]["arrows"])]),
+                      run_time=1.6)
+            self.wait(2.2)
+        else:
+            self.play(LaggedStart(*[FadeIn(a, shift=RIGHT * 0.1) for a in cols["v"]["arrows"]]), run_time=1.2)
+            self.say(r"A vessel is a dark strip: it owns both of its borders.", wait=0.6)
+            self.play(LaggedStart(*[FadeIn(a, shift=RIGHT * 0.1) for a in cols["s"]["arrows"]]), run_time=0.8)
+            self.say(r"A single edge, such as a glare border or the aperture's rim, owns only one."
+                     r" Yet line cells answer to both.", wait="read")
 
         # squash the views into strips above the plots
         anims = []
@@ -179,11 +186,15 @@ class BorderOwnership(ChapterScene):
             c["pos"] = graph(ax, XS, np.maximum(np.interp(XS, X, odd), 0), LEFT_OWN, 3, fill=0.25)
             c["neg"] = graph(ax, XS, np.minimum(np.interp(XS, X, odd), 0), RIGHT_OWN, 3, fill=0.25)
         self.say(r"An edge cell responds where the OD steps. Its sign says which side is darker: the side that owns the border.")
-        self.play(*[Create(c["odd_curve"]) for c in cols.values()], *[FadeIn(c["c_lbl"]) for c in cols.values()],
-                  run_time=1.4)
-        self.play(*[FadeOut(c["odd_curve"]) for c in cols.values()],
-                  *[FadeIn(c["pos"]) for c in cols.values()], *[FadeIn(c["neg"]) for c in cols.values()],
-                  run_time=1.0)
+        if self.short:
+            self.play(*[Create(c["pos"]) for c in cols.values()], *[Create(c["neg"]) for c in cols.values()],
+                      *[FadeIn(c["c_lbl"]) for c in cols.values()], run_time=1.4)
+        else:
+            self.play(*[Create(c["odd_curve"]) for c in cols.values()], *[FadeIn(c["c_lbl"]) for c in cols.values()],
+                      run_time=1.4)
+            self.play(*[FadeOut(c["odd_curve"]) for c in cols.values()],
+                      *[FadeIn(c["pos"]) for c in cols.values()], *[FadeIn(c["neg"]) for c in cols.values()],
+                      run_time=1.0)
         if self.at(2):
             kv = cols["v"]
             own_l = label(r"owned to its left", 0.42, LEFT_OWN).move_to(kv["ax_c"].c2p(12.0, 0.75))
@@ -378,10 +389,11 @@ class BorderOwnership(ChapterScene):
             return VGroup(BackgroundRectangle(t, fill_opacity=0.65, buff=0.04), t)
         tags = VGroup(tag(r"glare edge", (60, 112)), tag(r"wide, flat floor", (166, 9)),
                       tag(r"thin", (182, 45)), tag(r"faint", (22, 30), FAINT_COL))
-        self.say(r"In two dimensions, with noise: a thin vessel, a wide flat-floored one, a faint one and a glare edge.")
+        if not self.short:
+            self.say(r"In two dimensions, with noise: a thin vessel, a wide flat-floored one, a faint one and a glare edge.")
         self.play(FadeIn(cam), Create(frames[0]), FadeIn(titles[0]), run_time=1.0)
         self.play(LaggedStart(*[FadeIn(t) for t in tags], lag_ratio=0.3), run_time=1.2)
-        self.wait(0.8)
+        self.wait(0.2 if self.short else 0.8)
         self.say(r"Line cells light the midlines, but also a false line along the edge, and only the walls of the wide vessel.")
         self.play(FadeIn(cmap), Create(frames[1]), FadeIn(titles[1]), run_time=1.2)
         self.wait(1.6)

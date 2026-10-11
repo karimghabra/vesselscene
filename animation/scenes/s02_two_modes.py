@@ -95,6 +95,19 @@ def features():
 
 
 @lru_cache(maxsize=None)
+def ground_veil():
+    """Figure and ground on the window: the ground (no vessel in vesselscene's
+    clean OD) darkened, the vessels (the figure) left as they are."""
+    x0, y0, sz = REGION
+    od = np.asarray(BK.scene().od, float)[y0:y0 + sz, x0:x0 + sz]
+    fig = gaussian_filter((od > 0.015).astype(float), 1.2)
+    a = 0.68 * (1.0 - np.clip(fig * 1.6, 0, 1))
+    rgba = np.zeros((sz, sz, 4), np.uint8)
+    rgba[..., 3] = (a * 255).astype(np.uint8)
+    return rgba
+
+
+@lru_cache(maxsize=None)
 def toy_tuning():
     """A hypercolumn's tuning curve on a toy vessel (16 orientations)."""
     od = N.vessel_od((64, 64), [((6.0, 44.0), (58.0, 20.0), 3.0, 0.15)], blur=1.0)
@@ -271,7 +284,7 @@ class TwoModes(BK.PacedCaptions, ChapterScene):
             feats.add(Line(c - d, c + d, stroke_color=orientation_color(th), stroke_width=2 + 2.5 * v))
         runs = BK.clipped_runs(x0, y0, sz, sz, ppf, width=3.5)
         rings = BK.rings_in(x0, y0, sz, sz, ppf, width=3.0)
-        veil = Rectangle(width=PANEL_H, height=PANEL_H, stroke_width=0, fill_color=BLACK, fill_opacity=0.55).move_to(PANEL_C)
+        veil = BK.photo(ground_veil(), PANEL_H).move_to(PANEL_C)
         p_t1 = Tex(r"V1: local features, everywhere", color=FF).scale(0.5).next_to(frame, UP, buff=0.15)
         p_t2 = Tex(r"objects, figure and ground, junctions", color=FB).scale(0.5).next_to(frame, UP, buff=0.15)
 

@@ -116,7 +116,7 @@ class AttentiveGrouping(ChapterScene):
         self.play(Create(cp), Create(cq), run_time=1.2 if self.short else 1.6)
         self.play(FadeIn(a, scale=2), FadeIn(b, scale=2), run_time=0.6)
         self.say(r"Are the two dots on the same curve? You cannot see it at a glance: you have to trace it.",
-                 wait=1.0 if self.short else 2.0)
+                 wait=1.0 if self.short else (2.0 if self.at(3) else 1.2))
 
         # the label spreads along the curve at a constant speed
         lab = cp.copy().set_stroke(ATTN, width=9, opacity=0.95)
@@ -153,7 +153,7 @@ class AttentiveGrouping(ChapterScene):
             self.play(Create(lab2), bar2.animate.stretch_to_fit_width(2.6 * frac, about_edge=LEFT),
                       run_time=T * frac, rate_func=linear)
             self.say(r"The longer the path along the curve, the longer it takes (Jolicoeur, Ullman and Mackay 1986):"
-                     r" grouping a curve is serial.", wait=2.4)
+                     r" grouping a curve is serial.", wait=2.4 if self.at(3) else 1.6)
         else:
             self.wait(1.6)
         self.clear()
@@ -189,7 +189,7 @@ class AttentiveGrouping(ChapterScene):
                       tag(r"fork", (fork.x, fork.y), UP))
         if not self.short:
             self.play(LaggedStart(*[FadeIn(t) for t in tags], lag_ratio=0.3), run_time=1.0)
-            self.wait(2.0)
+            self.wait(2.0 if self.at(3) else 0.8)
             self.play(FadeOut(tags), run_time=0.5)
 
         unit = pf.unit
@@ -218,7 +218,7 @@ class AttentiveGrouping(ChapterScene):
             if i == 0 and not self.short:
                 self.say(r"A label (yellow) starts at the strongest point and spreads both ways along the vessel's"
                          r" own orientation sheet.")
-                self.wait(1.6)
+                self.wait(1.6 if self.at(3) else 0.8)
             elif i == 1:
                 self.say(r"Attention moves on: the next strongest seed starts a new vessel, with a new identity."
                          if not self.short else r"Attention moves on: each next seed starts a new identity.")
@@ -254,14 +254,14 @@ class AttentiveGrouping(ChapterScene):
             claim_overlays.append(veil)
             self.toy_mobs.add(final, veil)
             if i == 0:
-                self.wait(0.8 if self.short else 1.8)
+                self.wait(0.8 if self.short else (1.8 if self.at(3) else 1.0))
             if i == 0 and v.queued and not self.short:
                 qx, qy = v.queued[0]
                 ring = Circle(radius=0.14, stroke_color=ATTN, stroke_width=3).move_to(pf.point(qx, qy))
                 qt = Tex(r"branch queued", color=ATTN).scale(0.42).next_to(ring, DOWN, buff=0.08)
                 qt = VGroup(BackgroundRectangle(qt, fill_opacity=0.6, buff=0.03), qt)
                 self.play(Create(ring), FadeIn(qt), run_time=0.7)
-                self.wait(0.6 if self.short else 1.2)
+                self.wait(1.2 if self.at(3) else 0.7)
                 self.play(FadeOut(ring), FadeOut(qt), run_time=0.5)
             if i == 1 and self.at(3):
                 self.say(r"It passes the first vessel's claim: inhibition of return holds only in that vessel's"
@@ -360,7 +360,7 @@ class AttentiveGrouping(ChapterScene):
         stop = Dot(ax.c2p(s[i_stop], min(C[i_stop], ymax)), radius=0.07, color=INH)
         stop_l = Tex(r"without the gain: stops", color=INH).scale(0.45).next_to(stop, LEFT, buff=0.15).shift(UP * 0.15)
         self.play(FadeIn(stop, scale=2), FadeIn(stop_l))
-        self.wait(1.2)
+        self.wait(1.2 if self.at(3) else 0.6)
         eq3 = MathTex(r"C_k\,(1+\gamma) > t_\text{low}", r"\iff", r"C_k > \frac{t_\text{low}}{1+\gamma}", r"= 1.54")
         eq3.scale(0.62)
         eq3[0][3:6].set_color(ATTN)
@@ -392,14 +392,14 @@ class AttentiveGrouping(ChapterScene):
         fl, ah = always_redraw(filled), always_redraw(ahead)
         self.add(fl, ah)
         self.say(r"With the gain, the stretch passes: its evidence is above $1.54$ though below $2$.")
-        self.play(fr.animate.set_value(float(sl[-1]) - 1.0), run_time=5.0, rate_func=linear)
+        self.play(fr.animate.set_value(float(sl[-1]) - 1.0), run_time=5.0 if self.at(3) else 4.0, rate_func=linear)
         fl.clear_updaters(); ah.clear_updaters()
         self.play(FadeOut(ah), run_time=0.3)
         if self.at(3):
             self.say(r"A vessel continues through stretches below the tracing threshold when both sides belong to it.",
                      wait="read")
         else:
-            self.wait(1.0)
+            self.wait(0.5)
         self.clear()
 
     # ---------------------------------------------------- 4. junction rule
@@ -538,8 +538,8 @@ class AttentiveGrouping(ChapterScene):
         self.play(FadeIn(im), Create(fr), FadeIn(ttl), run_time=1.0)
         self.say(r"On a real image the goal is one identity per vessel, through every crossing and fork, found one vessel at a time.")
         n = len(groups)
-        self.play(LaggedStart(*[Create(gp) for gp in groups], lag_ratio=0.06), run_time=3.6 if self.short else 5.0)
-        self.wait(1.3 if self.short else 2.0)
+        self.play(LaggedStart(*[Create(gp) for gp in groups], lag_ratio=0.06), run_time=5.0 if self.at(3) else (4.0 if self.at(2) else 3.6))
+        self.wait(2.0 if self.at(3) else (1.0 if self.at(2) else 1.3))
         self.real_mobs = Group(im, fr, ttl, *groups)
 
     # ------------------------------------------------ 7. level 3: as built

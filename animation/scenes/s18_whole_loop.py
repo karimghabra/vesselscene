@@ -330,7 +330,7 @@ class WholeLoop(BK.PacedCaptions, ChapterScene):
         if self.at(3):
             back = CurvedArrow(real_g.get_top() + UP * 0.05, syn.get_bottom() + DOWN * 0.08, angle=0.5, color=FB,
                                stroke_width=3, tip_length=0.16)
-            back_l = Tex(r"what the real residuals show is missing\\goes into the generator", color=FB).scale(0.45)
+            back_l = Tex(r"what the real residuals show\\is missing goes into\\the generator", color=FB).scale(0.45)
             back_l.next_to(back, RIGHT, buff=0.2)
             self.say(r"Where the gates disagree, the real residuals show what vesselscene lacks; that is added to the generator, not tuned around in the annotator.")
             self.play(Create(back), FadeIn(back_l), run_time=1.2)
