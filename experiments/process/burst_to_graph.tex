@@ -15,39 +15,115 @@
 \newcommand{\OD}{\mathrm{OD}}
 \DeclareMathOperator*{\argmax}{arg\,max}
 
-\title{From burst to vessel graph:\\ stabilisation, optical density and Hessian vesselness}
+\title{From burst to vessel graph:\\ gating, stabilisation, optical density and Hessian vesselness}
 \author{}
 \date{11 October 2026}
 
 \begin{document}
 \maketitle
 
-\noindent This note sets out the first stages of vessel annotation as equations: an unstabilised burst is
-aligned by phase correlation and averaged (section~\ref{sec:stab}); the average is converted to optical density
-(section~\ref{sec:od}); multi-scale Gaussian derivatives give the Hessian at every pixel and scale
+\noindent This note sets out the first stages of vessel annotation as equations, following the MICA code where it
+exists (\texttt{ingest\_stabilize.py}, \texttt{background.py}). Frames that are blurred or show no vessels are gated
+out (section~\ref{sec:gate}). The burst is split into fixations at saccades and registered within and between
+fixations, with rotation (section~\ref{sec:stab}). Fixations are clustered by their fitted backgrounds, and each
+cluster's average is converted to optical density with its own background before the clusters are combined
+(section~\ref{sec:od}). Multi-scale Gaussian derivatives then give the Hessian at every pixel and scale
 (sections~\ref{sec:scale}--\ref{sec:hessian}), from which Frangi's vesselness and a width estimate follow
-(sections~\ref{sec:frangi}--\ref{sec:width}); and vesselness is turned into a graph (section~\ref{sec:graph}).
+(sections~\ref{sec:frangi}--\ref{sec:width}), and vesselness is turned into a graph (section~\ref{sec:graph}).
 Section~\ref{sec:limits} shows where this Hessian chain fails, which is why the later stages use oriented cells.
 
 \section*{Notation}
 \begin{tabular}{@{}ll@{}}
 $I_k(\x)$, $k = 1,\dots,N$ & the frames of the burst; mono12, so values are DN in $[0, 4095]$ \\
 $\x = (x, y)$ & pixel position; the image is $W \times H$ pixels \\
-$M_k(\x) \in \{0, 1\}$ & validity mask of frame $k$ \\
 $\F$, $\Fi$ & discrete Fourier transform and its inverse \\
 $G_\sigma$ & 2-D Gaussian of standard deviation $\sigma$ (px); $*$ is convolution \\
-$\bar I(\x)$ & the stabilised average \\
+$\Phi_f$ & the frames of fixation $f$; $\mathcal C_q$ the fixations of background cluster $q$ \\
+$T_k$ & the transform from stabilised coordinates into frame $k$ \\
+$I_k'(\x)$ & frame $k$ after stabilisation; $\bar I$ an average of stabilised frames \\
+$L = \ln \bar I$, $B$ & log image and fitted background, in log units \\
 $\OD(\x)$ & optical density; $\sigma_n(\x)$ its noise \\
 \end{tabular}
 
-\section{Burst to stabilised average}\label{sec:stab}
+\section{Frame gating}\label{sec:gate}
 
-\paragraph{Valid pixels.} A pixel is invalid where it is saturated:
+Each frame is scored on a copy shrunk by $D = 4$ (block means) and divided by its own mean, so changes of exposure
+do not move the scores:
 \begin{equation}
-  M_k(\x) = \begin{cases} 0 & I_k(\x) = 4095 \\ 1 & \text{otherwise.} \end{cases}
+  \tilde I_k = \frac{{\downarrow_D} I_k}{\bigl\langle {\downarrow_D} I_k \bigr\rangle_\x}.
 \end{equation}
-Invalid pixels are filled with a local mean before any Fourier transform, so they do not ring, and are kept
-invalid in the average.
+The scores are sharpness, the variance of the Laplacian (Pech-Pacheco et al., 2000), and vessel content, the mean Frangi vesselness
+(section~\ref{sec:frangi}; scales $\sigma \in \{1, 2, 3\}$ px of the shrunk frame, so 4--12 px of the original,
+dark ridges):
+\begin{equation}
+  s_k = \operatorname{Var}_\x\!\bigl(\nabla^2 \tilde I_k\bigr),
+  \qquad
+  v_k = \bigl\langle V(\tilde I_k) \bigr\rangle_\x,
+\end{equation}
+with $\nabla^2$ the 4-neighbour discrete Laplacian, kernel
+$\left(\begin{smallmatrix} 0 & -1 & 0 \\ -1 & 4 & -1 \\ 0 & -1 & 0 \end{smallmatrix}\right)$. A frame passes when both
+scores are at least 0.8 of the burst's median:
+\begin{equation}
+  \mathrm{keep}_k = \bigl[\, s_k \ge 0.8\, \operatorname{med}_j s_j \,\bigr] \wedge \bigl[\, v_k \ge 0.8\, \operatorname{med}_j v_j \,\bigr].
+\end{equation}
+Thresholds relative to the median adapt to each burst's exposure, noise and content; they assume most frames are
+good.
+
+\paragraph{Two corrections.} As defined, both scores can rank the wrong frames first. Table~\ref{tab:gate} scores
+synthetic frames: the same vessels sharp, blurred or absent, and dim frames with 0.3 times the light, whose
+relative noise after division by the mean is 3.3 times higher.
+\begin{itemize}
+  \item \textbf{Noise adds to the sharpness.} For white noise of standard deviation $\hat\sigma_k$, the Laplacian
+        adds $20\,\hat\sigma_k^2$ to $s_k$ (20 is the sum of its squared weights), so a dim, vessel-free frame
+        scored as the sharpest. Subtract the noise term,
+        \begin{equation}
+          s_k' = s_k - 20\,\hat\sigma_k^2,
+          \qquad
+          \hat\sigma_k = \sqrt{\frac{\pi}{2}}\, \frac{1}{6(W-2)(H-2)} \sum_\x \bigl|(\tilde I_k * N)(\x)\bigr|,
+          \quad
+          N = \left(\begin{smallmatrix} 1 & -2 & 1 \\ -2 & 4 & -2 \\ 1 & -2 & 1 \end{smallmatrix}\right),
+        \end{equation}
+        with $\hat\sigma_k$ from Immerk{\ae}r's estimator ($W, H$ here the shrunk frame's size).
+  \item \textbf{Frangi's $c$ is set per frame.} scikit-image sets $c$ to half the largest $S$ of each frame (at its
+        first scale), so a frame with no vessels is scored against its own noise, and its noise looks vessel-like.
+        Vessel-free frames got the highest mean vesselness. Use one $c$ for the whole burst, from its median frame,
+        or $c$ in noise units (section~\ref{sec:frangi}).
+\end{itemize}
+
+\begin{table}[H]
+\centering
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+frame & $s_k$ ($10^{-4}$) & $s_k'$ ($10^{-4}$) & $v_k$, own $c$ & $v_k$, burst $c$ \\
+\midrule
+sharp & 8.95 & 6.77 & 0.0179 & 0.0071 \\
+blurred, 4 px & 4.65 & 2.64 & 0.0210 & 0.0043 \\
+blurred, 8 px & 2.78 & 0.74 & 0.0261 & 0.0018 \\
+no vessels & 1.91 & $-0.01$ & 0.0572 & 0.0000 \\
+no vessels, dim & 20.90 & $-0.14$ & 0.0598 & 0.0003 \\
+sharp, dim & 29.30 & 6.79 & 0.0179 & 0.0074 \\
+\bottomrule
+\end{tabular}
+\caption{Gate scores of synthetic frames, one of each kind (blur in pixels of the full frame; the burst's $c$ taken
+from the 4 px frame, standing in for the median frame). The raw scores rank a dim, vessel-free frame as the sharpest
+and vessel-free frames as the most vessel-like. The corrected scores rank sharp, then blurred, then no vessels,
+whatever the brightness. Check them on real bursts with known blinks before changing the thresholds.}
+\label{tab:gate}
+\end{table}
+
+\section{Stabilisation}\label{sec:stab}
+
+\paragraph{Cleaned copies for registration.} Registration runs on cleaned copies of the frames; the frames
+themselves are only warped at the end. Dividing by the burst's per-pixel mean $\bar S(\x) = \langle I_k(\x)
+\rangle_k$ removes what is fixed to the sensor (dust, hot pixels, illumination fall-off), since the moving retina
+blurs out of the mean. A high-pass then removes slow brightness changes:
+\begin{equation}
+  J_k = \frac{I_k}{\bar S} - G_{\sigma_h} * \frac{I_k}{\bar S}, \qquad \sigma_h = 20 \text{ px}.
+\end{equation}
+Both would otherwise pull the registration towards zero shift. The mean is used, not the median: when most frames
+sit near one position, the median keeps a sharp copy of the retina, which, divided into every frame, pulls the
+registration back to zero. Fourier transforms are taken of $w J_k$, with $w$ a Hann window that tapers the borders
+to zero, so the frame edges do not register.
 
 \paragraph{The Fourier shift theorem.} With the discrete transform
 \begin{equation}
@@ -60,10 +136,9 @@ a translation by $\Delta = (\Delta_x, \Delta_y)$ multiplies the transform by a p
   \label{eq:shift}
 \end{equation}
 
-\paragraph{Shift estimate by phase correlation.} Window each frame with a Hann window $w(\x)$, so the image edges
-do not dominate, and transform: $F_k = \F\{w\, I_k\}$. If frame $k$ is the reference moved by $\Delta_k$, then
-$F_k \approx F_\mathrm{ref}\, e^{-2\pi i \phi(\Delta_k)}$, and the normalised cross-power spectrum keeps only the
-phase ramp:
+\paragraph{Shift by phase correlation.} Let $F_k = \F\{w J_k\}$. If frame $k$ is the reference moved by $\Delta_k$,
+then $F_k \approx F_\mathrm{ref}\, e^{-2\pi i \phi(\Delta_k)}$, and the normalised cross-power spectrum keeps only
+the phase ramp:
 \begin{equation}
   R_k(u, v) = \frac{F_k(u, v)\, F_\mathrm{ref}^*(u, v)}{\left| F_k(u, v)\, F_\mathrm{ref}^*(u, v) \right| + \epsilon}
   \approx e^{-2\pi i \phi(\Delta_k)},
@@ -71,56 +146,139 @@ phase ramp:
   r_k(\x) = \Fi\{R_k\}(\x) \approx \delta(\x - \Delta_k).
 \end{equation}
 The shift is the position of the peak, $\Delta_k = \argmax_\x r_k(\x)$, with indices above $W/2$ (or $H/2$) read as
-negative shifts. $\epsilon$ is a small constant that keeps empty frequencies from dividing by zero.
+negative shifts; $\epsilon$ keeps empty frequencies from dividing by zero. The peak is refined to $1/U$ px with an
+upsampled DFT around it, $U = 10$ (Guizar-Sicairos, Thurman and Fienup, 2008). A simpler refinement fits a parabola
+through the peak and its neighbours, $\delta_x = (r_{-1} - r_{+1}) / \bigl(2(r_{-1} - 2r_0 + r_{+1})\bigr)$ along
+$x$, and the same along $y$.
 
-\paragraph{Sub-pixel precision.} Fit a parabola through the peak and its two neighbours along each axis. Along $x$,
-with $r_{-1}, r_0, r_{+1}$ the values left of, at and right of the peak,
+\paragraph{Fixations.} The eye holds still (fixations) between fast jumps (saccades). On frames shrunk by 4, the
+shift between consecutive frames, $\Delta_{k-1 \to k}$, is measured by phase correlation, and the burst is cut
+wherever $|\Delta_{k-1 \to k}| > 30$ px. This gives fixations $\Phi_1, \dots, \Phi_F$, runs of consecutive frames.
+
+\paragraph{Within a fixation.} The reference is the fixation's sharpest passed frame,
+$r_f = \argmax\, \{ s_k : k \in \Phi_f,\ \mathrm{keep}_k \}$ (any of its frames if none passed). Every frame of the
+fixation is registered onto it by phase correlation, to 0.1 px. Within a fixation the motion is mostly
+translation; where rotation matters there too, the translation is the starting point of the same ECC refinement
+used between fixations, with the Euclidean model.
+
+\paragraph{Between fixations.} Each fixation's cleaned, aligned, passed frames are averaged into $A_f$. The main
+fixation $f_0$ is the one with the most passed frames. Each $A_f$ is aligned onto $A_{f_0}$: first a translation by
+phase correlation, then a refinement by ECC with one of two motion models: Euclidean (rotation and translation,
+since the eye can twist during a saccade) or affine (which adds scale and shear). If the ECC search fails, the
+translation is kept.
+
+\paragraph{The transforms.} Each transform maps stabilised (reference) coordinates into the original frame:
 \begin{equation}
-  \delta_x = \frac{r_{-1} - r_{+1}}{2\,(r_{-1} - 2 r_0 + r_{+1})},
+  T(\x) = \mathbf A \x + \mathbf t,
+  \qquad
+  \mathbf A = \begin{pmatrix} \cos\theta & -\sin\theta \\ \sin\theta & \cos\theta \end{pmatrix} \ \text{(Euclidean)},
+  \qquad
+  \mathbf A \in \mathbb R^{2 \times 2} \ \text{(affine)}.
 \end{equation}
-and the same along $y$. For higher precision, refine the peak with an upsampled DFT around it
-(Guizar-Sicairos, Thurman and Fienup, 2008).
-
-\paragraph{Applying the shift.} Undo the displacement with the shift theorem~\eqref{eq:shift}, on the unwindowed
-frame:
+A frame's full transform composes its fixation's offset with its own registration,
+$T_k = T^{\mathrm{in}}_k \circ T^{\mathrm{fix}}_{f(k)}$: from the main reference to its fixation's reference, then
+into the frame. The stabilised frame is
 \begin{equation}
-  I_k'(\x) = \Fi\!\left\{ \F\{I_k\}(u, v)\; e^{+2\pi i\, \phi(\Delta_k)} \right\}(\x) = I_k(\x + \Delta_k).
+  I_k'(\x) = I_k\bigl(T_k(\x)\bigr),
 \end{equation}
-The mask moves with the frame (rounded to whole pixels), and the band of $|\Delta_{k,x}|$ columns and
-$|\Delta_{k,y}|$ rows that wrapped around the border becomes invalid: $M_k'$.
+by cubic interpolation, and NaN where $T_k(\x)$ falls outside the frame. The rotation is read back as
+$\theta_k = \operatorname{atan2}(A_{21}, A_{11})$.
 
-\paragraph{Reference and rejection.} Use a sharp frame (or the median frame) as the first reference, then repeat the
-alignment against the first average. Reject frames whose correlation peak $r_k(\Delta_k)$ is low: blinks, or motion
-too large for one translation.
-
-\paragraph{Average.}
+\paragraph{ECC.} The enhanced correlation coefficient (Evangelidis and Psarakis, 2008) between the main fixation's
+average and a warped fixation average is
 \begin{equation}
-  \bar I(\x) = \frac{\sum_k M_k'(\x)\, I_k'(\x)}{\sum_k M_k'(\x)},
-  \qquad \bar I(\x) = \text{NaN where } \textstyle\sum_k M_k'(\x) = 0.
+  \rho(\mathbf p) = \frac{\hat{\mathbf a}_{f_0}^{\top}\, \hat{\mathbf a}_f(\mathbf p)}
+                        {\|\hat{\mathbf a}_{f_0}\|\; \|\hat{\mathbf a}_f(\mathbf p)\|},
 \end{equation}
-The noise falls as $1/\sqrt{n(\x)}$, with $n(\x) = \sum_k M_k'(\x)$ the number of frames that saw the pixel.
+where $\hat{\mathbf a}$ are the images as zero-mean vectors over the pixels and $\mathbf p$ are the transform's
+parameters ($\theta$ and $\mathbf t$, or the six affine entries). It is maximised iteratively from the
+phase-correlation start (up to 200 iterations, or until $\mathbf p$ changes by less than $10^{-6}$), after a light
+Gaussian smoothing. Because it is normalised, it ignores differences of brightness and contrast between the
+fixation averages.
 
-\paragraph{Limit.} This corrects translation only. Rotation, or tissue that deforms during the burst, needs a
-richer motion model; the residual shows as blur in the average.
+\paragraph{Rotation in the Fourier domain.} An alternative start for the rotation needs no search. The magnitude
+$|\F\{I\}|$ ignores translation, and rotating the image rotates it by the same angle. Resampled in polar
+coordinates, the rotation becomes a shift along the angle axis, which phase correlation measures (Reddy and
+Chatterji, 1996). Derotate, then phase-correlate for the translation.
 
-\section{Optical density}\label{sec:od}
-
-Vessels absorb light, so they are dark in $\bar I$. By the Beer--Lambert law the light transmitted through a path
-of length $\ell$ in a medium of attenuation $\mu$ is $I = I_0\, e^{-\mu \ell}$, so
+\paragraph{Averages.} The stabilised burst keeps every frame. Averages use passed frames only, each pixel over the
+frames that cover it. For a set $\mathcal K$ of passed frames (all of them, one fixation, or one cluster below),
 \begin{equation}
-  \OD(\x) = \ln \frac{B(\x) - d}{\bar I(\x) - d} = \mu\, \ell(\x),
+  \bar I_{\mathcal K}(\x) = \frac{\sum_{k \in \mathcal K} m_k(\x)\, I_k'(\x)}{\sum_{k \in \mathcal K} m_k(\x)},
+  \qquad m_k(\x) = \bigl[\, I_k'(\x) \text{ is finite} \,\bigr],
 \end{equation}
-where $d$ is the camera's dark level (its black offset) and $B(\x)$ is the background: a smooth surface fitted to
-$\bar I$ with the vessels masked out (the mask can come from a first pass of the vesselness below).
+and NaN where no frame of the set covers the pixel. The noise falls as $1/\sqrt{n(\x)}$, with
+$n(\x) = \sum_{k \in \mathcal K} m_k(\x)$.
+
+\section{Background clusters and optical density}\label{sec:od}
+
+\paragraph{Optical density.} Vessels absorb light, so they are dark in $\bar I$. By the Beer--Lambert law the light
+transmitted through a path of length $\ell$ in a medium of attenuation $\mu$ is $I = I_0\, e^{-\mu \ell}$. With
+$L = \ln \bar I$ and a background $B$ in log units,
+\begin{equation}
+  \OD(\x) = B(\x) - L(\x) = \ln \frac{e^{B(\x)}}{\bar I(\x)} = \mu\, \ell(\x).
+\end{equation}
 \begin{itemize}
-  \item Vessels become positive and the background about zero.
-  \item Uneven illumination cancels, since $B$ and $\bar I$ share it.
+  \item Vessels become positive and the background about zero, and uneven illumination cancels.
   \item Across a round vessel of radius $r$, the path length is the chord, so the profile is
         $\OD(u) = 2\mu\sqrt{r^2 - u^2}$ at distance $u$ from the centreline, before the optics' blur.
+  \item This takes the camera's dark level as 0. If the camera adds a black offset $d$, subtract it from $\bar I$
+        first.
 \end{itemize}
-The noise map follows by propagation, $\sigma_n(\x) \approx \sigma_{\bar I}(\x) / (\bar I(\x) - d)$, or directly
-from the spread of $\OD$ on background pixels around its local mean. Thresholds below are in units of
-$\sigma_n$.
+
+\paragraph{Background fit.} Pixels with $0 < \bar I < 4095$ are good; the others take the log of the nearest good
+pixel and stay invalid.
+\begin{enumerate}
+  \item \textbf{First guess.} $B_0$ is a grey closing of $L$ (a maximum filter, then a minimum filter, over a disc
+        of radius 60 px, on a grid 4 times coarser, then smoothed). It fills dark structures up to about 120 px
+        wide, so the vessels vanish and the background around them remains. With $\OD_0 = B_0 - L$, the first
+        background pixels are those with $G_1 * \OD_0 < \operatorname{med} + 2\,\hat\sigma$, where
+        $\hat\sigma = 1.4826 \operatorname{MAD}$ is a robust standard deviation.
+  \item \textbf{Refit, twice.}
+        \begin{enumerate}
+          \item Contrast-to-noise at sizes $s \in \{1, 2, 4, \dots, 32\}$ px: the centre minus a surround twice as
+                wide, over its local noise on background pixels, and the best size:
+                $Z = \max_s \bigl(G_s * \OD - G_{2s} * \OD\bigr) / \operatorname{rms}_\mathrm{bg}$.
+          \item Vessel mask: $M = [Z > 2] \vee [\,G_1 * \OD > 3\,\sigma_n]$, dilated by 2 px so vessel edges do not
+                leak into the background.
+          \item Refit $B$ on the pixels outside $M$ by normalised convolution over four octaves
+                ($\sigma = 8 \cdot 2^j$ px with weights $0.03^j$, $j = 0, \dots, 3$), so wide vessels are bridged
+                from the background around them.
+          \item $\OD = B - L$.
+        \end{enumerate}
+\end{enumerate}
+
+\paragraph{Why cluster.} The light source is fixed to the camera, not to the eye. When the eye moves between
+fixations, the retina under a given stabilised pixel is lit differently: glare, vignetting and the illumination
+gradient move across it. An intensity average over fixations mixes these backgrounds, which no single smooth fit
+describes. Optical density removes the illumination, so it is computed for each group of fixations that share a
+background, and only then combined.
+
+\paragraph{Clustering.} \emph{(General form; match the distance and the threshold to the clustering code.)} For each
+fixation $f$, take the average of its passed frames, $\bar I_{\Phi_f}$, and its background fit $B_f$. The distance
+between two fixations' backgrounds is measured over the pixels both cover, with a global offset removed, since a
+change of exposure is a constant in log units and cancels in the optical density:
+\begin{equation}
+  D(f, g) = \operatorname{rms}_\x \Bigl[\, B_f(\x) - B_g(\x) - \operatorname{med}_\x \bigl(B_f - B_g\bigr) \Bigr].
+\end{equation}
+Agglomerative clustering with complete linkage, cut at a threshold $\tau$, groups the fixations into clusters
+$\mathcal C_1, \mathcal C_2, \dots$, within which every pair of backgrounds differs by less than $\tau$.
+
+\paragraph{Per cluster, then combined.} Each cluster $q$ gives the average of its passed frames, $\bar I_q$, its own
+background fit $B_q$, its optical density and that density's local noise:
+\begin{equation}
+  \OD_q = B_q - \ln \bar I_q, \qquad \sigma_q(\x) = \text{local rms of } \OD_q \text{ on background pixels}.
+\end{equation}
+Pixels saturated by glare in a cluster's frames are invalid in that cluster. The clusters combine by inverse
+variance, which also gives the noise of the result:
+\begin{equation}
+  \OD(\x) = \frac{\sum_q w_q(\x)\, \OD_q(\x)}{\sum_q w_q(\x)},
+  \qquad
+  w_q(\x) = \frac{1}{\sigma_q^2(\x)},
+  \qquad
+  \sigma_n(\x) = \Bigl(\sum_q w_q(\x)\Bigr)^{-1/2},
+\end{equation}
+with $w_q = 0$ where cluster $q$ has no valid data. Thresholds below are in units of $\sigma_n$.
 
 \section{Scale space}\label{sec:scale}
 
@@ -136,7 +294,7 @@ Smooth the optical density with Gaussians and take derivatives with Gaussian-der
 \end{equation}
 \begin{itemize}
   \item \textbf{Invalid pixels.} First fill them by normalised convolution,
-        $\widehat{\OD} = \bigl(G_\sigma * (M \cdot \OD)\bigr) / (G_\sigma * M)$, then take derivatives, and treat
+        $\widehat{\OD} = \bigl(G_\sigma * (m \cdot \OD)\bigr) / (G_\sigma * m)$, with $m$ the validity mask, then take derivatives, and treat
         pixels within about $3\sigma$ of invalid ones as unreliable. Otherwise every border and gap becomes a false
         edge.
   \item \textbf{Scales.} Steps of $\sqrt 2$: $\sigma_j = \sigma_0\, 2^{j/2}$, $j = 0, \dots, J - 1$. With
@@ -199,7 +357,7 @@ $R_B$ is near 0 for a line and near 1 for a blob; $S$ is near 0 on flat backgrou
   \item Frangi sets $c$ to half the largest $S$ in the image, which makes the result depend on the image's
         content. Here $c$ is set in noise units instead: $c = \kappa\, S_\mathrm{noise}(\sigma)$, with
         $S_\mathrm{noise}(\sigma)$ the root-mean-square $S$ of pure noise of level $\sigma_n$ at scale $\sigma$
-        (computed once by simulation), and $\kappa \approx 3$ to start.
+        (computed once by simulation), and $\kappa \approx 3$ to start. The same issue affects the frame gate (section~\ref{sec:gate}).
   \item On raw intensity, where vessels are dark, the sign test flips: $V_\sigma = 0$ where $\lambda_2 < 0$. In
         scikit-image: \texttt{skimage.filters.frangi(image, sigmas=..., black\_ridges=True)}.
 \end{itemize}
@@ -306,13 +464,22 @@ for plain vessel stretches, scale and width, and as the baseline; oriented cells
 \end{figure}
 
 \section*{References}
-\begin{itemize}[leftmargin=*]
+{\small
+\begin{itemize}[leftmargin=*,itemsep=1pt]
   \item A.~F.~Frangi, W.~J.~Niessen, K.~L.~Vincken and M.~A.~Viergever. Multiscale vessel enhancement filtering.
         \emph{MICCAI}, 1998.
   \item T.~Lindeberg. Edge detection and ridge detection with automatic scale selection. \emph{International
         Journal of Computer Vision} 30(2), 1998.
+  \item G.~D.~Evangelidis and E.~Z.~Psarakis. Parametric image alignment using enhanced correlation coefficient
+        maximization. \emph{IEEE Transactions on Pattern Analysis and Machine Intelligence} 30(10), 2008.
+  \item J.~Immerk{\ae}r. Fast noise variance estimation. \emph{Computer Vision and Image Understanding} 64(2), 1996.
+  \item J.~L.~Pech-Pacheco, G.~Crist{\'o}bal, J.~Chamorro-Mart{\'i}nez and J.~Fern{\'a}ndez-Valdivia. Diatom
+        autofocusing in brightfield microscopy: a comparative study. \emph{ICPR}, 2000.
+  \item B.~S.~Reddy and B.~N.~Chatterji. An FFT-based technique for translation, rotation, and scale-invariant image
+        registration. \emph{IEEE Transactions on Image Processing} 5(8), 1996.
   \item M.~Guizar-Sicairos, S.~T.~Thurman and J.~R.~Fienup. Efficient subpixel image registration algorithms.
         \emph{Optics Letters} 33(2), 2008.
 \end{itemize}
+}
 
 \end{document}
