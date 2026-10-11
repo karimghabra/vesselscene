@@ -188,8 +188,7 @@ class ColdOpen(BK.PacedCaptions, ChapterScene):
 
         # ======================================================= 2. average the burst
         count = Integer(1).scale(0.5)
-        count_l = VGroup(Tex(r"mean of", color=GREY_A).scale(0.5), count,
-                         Tex(r"frames", color=GREY_A).scale(0.5)).arrange(RIGHT, buff=0.1)
+        count_l = VGroup(Tex(r"frames averaged:", color=GREY_A).scale(0.5), count).arrange(RIGHT, buff=0.12)
         count_l.move_to(tag[0], aligned_edge=LEFT)
         k_tr = ValueTracker(1.0)
         if self.short:
@@ -586,7 +585,6 @@ class ColdOpen(BK.PacedCaptions, ChapterScene):
                   *[LaggedStart(*[Create(p) for p in ov], lag_ratio=0.2) for ov in overlays], run_time=1.8)
         self.wait(1.6)
         self.say(r"How would a visual system tell them apart? That is the question this whole spec answers.", wait="read")
-        self.play(FadeOut(Group(crops, frames, overlays, names)), run_time=0.8)
 
     # ------------------------------------------------------------------- title
     def title_card(self, pf):
