@@ -102,8 +102,11 @@ def render_one(file: str, scene: str, media: Path, preview: bool, manim: str, sk
         return out
     q = ["-ql"] if preview else ["-r", "1920,1080", "--fps", "30"]
     cmd = [manim, *q, "--media_dir", str(media), "--disable_caching", str(HERE / "scenes" / file), scene]
-    r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True)
-    if r.returncode != 0:
+    for attempt in range(3):          # parallel renders share the LaTeX cache and can race on it: retry
+        r = subprocess.run(cmd, cwd=HERE, capture_output=True, text=True)
+        if r.returncode == 0:
+            break
+    else:
         sys.stderr.write(r.stdout[-3000:] + r.stderr[-3000:])
         raise RuntimeError(f"{file} {scene} failed")
     print(f"rendered {scene}", flush=True)
