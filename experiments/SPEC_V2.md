@@ -1147,9 +1147,13 @@ Revision 2 adds:
 - **The vesselscene adapter for MICA (revision 2), needed for every gate:**
   - clone vesselscene on branch `claude/elegant-johnson-8n78yv` (the experiments are not on `main`), outside any
     synced folder, then `pip install -e .`;
-  - generate the development scenes: `python -m vesselscene scene --seed 0 4 7 8 --preset healthy -o scenes/dev`
-    and `python -m vesselscene scene --seed 0 --preset pathologic -o scenes/dev/pathologic_s000`;
-  - set `SPLINEFIT_DEV` to that folder;
+  - generate the development scenes at the sizes the frozen set uses, average stills only, on the CPU (the
+    generator defaults to `--device cuda`):
+    `python -m vesselscene scene --seed 0 7 8 --preset healthy --shape 480,768 --kinds average --device cpu -o scenes/dev`,
+    `python -m vesselscene scene --seed 4 --preset healthy --shape 320,512 --kinds average --device cpu -o scenes/dev/healthy_s004`,
+    `python -m vesselscene scene --seed 0 --preset pathologic --shape 480,768 --kinds average --device cpu -o scenes/dev/pathologic_s000`;
+  - set `SPLINEFIT_DEV` to that folder and `SPLINEFIT_WORK` to a working folder (both defaults point at a machine
+    that is not yours);
   - the adapter runs MICA's chain on each development average and hands centrelines, typed junctions and vessels
     to `score.py`, `junction_gallery.judge` and `probes.py`.
 - **Exhaustively annotated windows of a real average** (every junction with its type, every vessel end), for the
