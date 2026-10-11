@@ -5,6 +5,7 @@
     python versions.py render detailed --preview # 480p15, quick
     python versions.py render all -j 3           # every cut, 3 scenes at a time
     python versions.py prerender --chapters 1 4  # those chapters' scenes for every cut, skipping fresh ones
+    python versions.py export all                # compressed copies, the long cuts in parts under 30 MB
 
 Final quality is 1920x1080 at 30 fps.  Each chapter is a scene variant
 (<Base>Short / Medium / Detailed); a cut is its chapters in order (the
@@ -44,6 +45,11 @@ CHAPTERS = {
     18: ("s18_whole_loop.py", "WholeLoop"),
 }
 LEVEL_SUFFIX = {1: "Short", 2: "Medium", 3: "Detailed"}
+# export: the longer cuts in parts, split between chapters, each small enough to send (under 30 MB)
+PARTS = {
+    "medium": [[0, 1, 2, 4, 7], [8, 9, 10, 11, 14, 16, 18]],
+    "detailed": [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13, 14], [15, 16, 17, 18]],
+}
 CUTS = {
     "very_short": dict(level=None, chapters=[]),
     "short": dict(level=1, chapters=[0, 1, 2, 4, 8, 9, 10, 11, 14, 18]),
@@ -139,9 +145,35 @@ def render_cut(cut: str, preview: bool, jobs: int, manim: str, skip_existing: bo
     return out
 
 
+def export(cut: str) -> list[Path]:
+    """Compressed copies of a rendered cut (x264, CRF 28, tuned for animation:
+    SSIM 0.996 against the render), in parts for the long cuts."""
+    media = HERE / "media"
+    c = CUTS[cut]
+    groups = PARTS.get(cut, [c["chapters"]])
+    out = []
+    for i, chapters in enumerate(groups, 1):
+        todo = scenes(cut)
+        if c["level"] is not None:
+            todo = [(CHAPTERS[n][0], CHAPTERS[n][1] + LEVEL_SUFFIX[c["level"]]) for n in chapters]
+            if i == len(groups):
+                todo.append(("s_cards.py", "End" + LEVEL_SUFFIX[c["level"]]))
+        paths = [media / "videos" / Path(f).stem / "1080p30" / f"{s}.mp4" for f, s in todo]
+        name = f"{cut}_part{i}of{len(groups)}" if len(groups) > 1 else cut
+        lst = media / "cuts" / f"{name}_export.txt"
+        lst.write_text("".join(f"file '{p}'\n" for p in paths))
+        dst = media / "cuts" / "export" / f"{name}.mp4"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c:v", "libx264",
+                        "-preset", "slow", "-tune", "animation", "-crf", "28", "-pix_fmt", "yuv420p",
+                        "-movflags", "+faststart", str(dst)], check=True)
+        out.append(dst)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("action", choices=["list", "render", "prerender"])
+    ap.add_argument("action", choices=["list", "render", "prerender", "export"])
     ap.add_argument("cut", nargs="?", default="all", choices=["all", *CUTS])
     ap.add_argument("--preview", action="store_true")
     ap.add_argument("--skip-existing", action="store_true", help="keep renders newer than their sources")
@@ -157,6 +189,10 @@ def main():
         return
     cuts = list(CUTS) if a.cut == "all" else [a.cut]
     for cut in cuts:
+        if a.action == "export":
+            for p in export(cut):
+                print(p, f"{p.stat().st_size / 2**20:.1f} MiB")
+            continue
         if a.action == "list":
             print(cut)
             for f, s in scenes(cut):
