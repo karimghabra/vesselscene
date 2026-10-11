@@ -280,30 +280,43 @@ class Sheets(ChapterScene):
             self.play(Create(rings), FadeIn(tl))
             self.wait(1.5)
             extra.add(rings, tl)
-            # why: at a pixel of the faint vessel near the crossing, the strong vessel's lobe wins
+            # why: across the faint vessel near the crossing, the collapsed map has no crest there
+            from scipy.ndimage import map_coordinates
             q = GR.RO_CENTRE + 5.0 * st["uf"]
-            vals = C[:, int(round(q[1])), int(round(q[0]))]
-            ring = Circle(radius=0.12, stroke_color=WHITE, stroke_width=3).move_to(pfL.point(*q))
-            ch = bar_chart(vals, width=4.2, height=2.3, vmax=float(vals.max()) * 1.1,
-                           colors=[orientation_color(t) for t in N.THETAS]).move_to(R + DOWN * 0.3 + LEFT * 0.5)
-            kbest = int(np.argmax(vals))
-            bt = Tex(r"the 16 values at that pixel, 5 px from the crossing").scale(0.48).next_to(ch, UP, buff=0.3)
-            b1 = Tex(r"best: toward the\\strong vessel", color=orientation_color(N.THETAS[kbest])).scale(0.42)
-            b2 = Tex(r"the faint vessel's\\own sheet: discarded", color=orientation_color(N.THETAS[k_f])).scale(0.42)
-            top1, top2 = ch[1][kbest].get_top(), ch[1][k_f].get_top()
-            b1.next_to(ch, RIGHT, buff=0.15).set_y(top1[1])
-            b2.move_to([ch.get_left()[0] + 1.6, top2[1] + 0.15, 0])
-            ar1 = Arrow(b1.get_left() + LEFT * 0.02, top1 + RIGHT * 0.05, buff=0.04, stroke_width=2,
-                        color=orientation_color(N.THETAS[kbest]), max_tip_length_to_length_ratio=0.2)
-            ar2 = Arrow(b2.get_right() + RIGHT * 0.02, top2 + LEFT * 0.05, buff=0.04, stroke_width=2,
-                        color=orientation_color(N.THETAS[k_f]), max_tip_length_to_length_ratio=0.2)
-            b1, b2 = VGroup(b1, ar1), VGroup(b2, ar2)
-            self.say(r"Why: on the faint vessel near the crossing, the strong vessel's lobe is the larger, so the best"
-                     r" orientation is the strong one's.")
-            self.play(Create(ring), FadeIn(bt), Create(ch), run_time=1.2)
-            self.play(FadeIn(b1), FadeIn(b2), Indicate(ch[1][k_f], color=WHITE), run_time=1.2)
-            self.wait(2.2)
-            self.play(FadeOut(VGroup(ch, bt, b1, b2)), FadeOut(ring), run_time=0.6)
+            nf = np.array([-st["uf"][1], st["uf"][0]])
+            ahead = map_coordinates(M, [[q[1] + 3 * nf[1], q[1] - 3 * nf[1]], [q[0] + 3 * nf[0], q[0] - 3 * nf[0]]], order=1)
+            if ahead[0] < ahead[1]:                                # point the profile toward the strong vessel
+                nf = -nf
+            ss = np.arange(-7.0, 7.01, 0.25)
+            P = q[None] + ss[:, None] * nf[None]
+            own_p = map_coordinates(C[k_f], [P[:, 1], P[:, 0]], order=1)
+            col_p = map_coordinates(M, [P[:, 1], P[:, 0]], order=1)
+            probe = Line(pfL.point(*(q - 7 * nf)), pfL.point(*(q + 7 * nf)), stroke_color=WHITE, stroke_width=3)
+            ax = Axes(x_range=[-7, 7, 7], y_range=[0, 80, 20], x_length=4.4, y_length=2.6, tips=False,
+                      axis_config=dict(color=MUTED, stroke_width=1.5, include_ticks=False)).move_to(R + DOWN * 0.15)
+            cc = VMobject(stroke_color=orientation_color(N.THETAS[k_s]), stroke_width=4).set_points_as_corners(
+                [ax.c2p(a, b) for a, b in zip(ss, col_p)])
+            oc = VMobject(stroke_color=orientation_color(N.THETAS[k_f]), stroke_width=4).set_points_as_corners(
+                [ax.c2p(a, b) for a, b in zip(ss, own_p)])
+            i_own = int(np.argmax(own_p))
+            crest = Dot(ax.c2p(ss[i_own], own_p[i_own]), radius=0.07, color=orientation_color(N.THETAS[k_f]))
+            mid = DashedLine(ax.c2p(0, 0), ax.c2p(0, 80), stroke_color=MUTED, stroke_width=1.5)
+            bt = Tex(r"across the faint vessel, 5 px from the crossing").scale(0.48).next_to(ax, UP, buff=0.25)
+            l1 = Tex(r"collapsed: no crest here,\\it climbs to the strong vessel", color=orientation_color(N.THETAS[k_s])).scale(0.42)
+            l1.move_to(ax.c2p(-6.8, 68), aligned_edge=LEFT)
+            l2 = Tex(r"its own sheet: a crest", color=orientation_color(N.THETAS[k_f])).scale(0.42)
+            l2.next_to(crest, LEFT, buff=0.25).shift(DOWN * 0.15)
+            xl = Tex(r"faint vessel's centre", color=MUTED).scale(0.38).next_to(ax.c2p(0, 0), DOWN, buff=0.1).align_to(ax.c2p(0, 0), RIGHT)
+            xr = Tex(r"strong one $\rightarrow$", color=MUTED).scale(0.38).next_to(ax.c2p(7, 0), DOWN, buff=0.1).align_to(ax, RIGHT)
+            self.say(r"Why: across the faint vessel near the crossing, the best value per pixel climbs toward the strong vessel,"
+                     r" so the faint one has no crest there.")
+            self.play(Create(probe), Create(ax), FadeIn(bt), Create(mid), FadeIn(xl), FadeIn(xr), run_time=1.0)
+            self.play(Create(cc), FadeIn(l1), run_time=1.2)
+            self.wait(1.2)
+            self.say(r"In the faint vessel's own sheet, the same profile has a crest: a ridge top across that sheet's normal.")
+            self.play(Create(oc), FadeIn(crest), FadeIn(l2), run_time=1.2)
+            self.wait(2.0)
+            self.play(FadeOut(VGroup(ax, cc, oc, crest, mid, bt, l1, l2, xl, xr, probe)), run_time=0.6)
 
         # per orientation: the faint vessel's own sheet keeps its crest
         sh = rgba(tinted(C[k_f][crop], N.THETAS[k_f], alpha_floor=0.0))
@@ -365,7 +378,7 @@ class Sheets(ChapterScene):
                       ).scale(0.55).arrange(DOWN, aligned_edge=LEFT, buff=0.16).move_to([0, 0.6, 0])
         self.say(r"So every layer up to the readout keeps all 16 sheets; lines, traces and junction lists are decoded from them.")
         self.play(LaggedStart(*[FadeIn(c, shift=UP * 0.1) for c in card], lag_ratio=0.25), run_time=1.6)
-        self.wait(3.5)
+        self.wait(5.0)
         self.play(FadeOut(card), run_time=0.6)
         S = GR.sine_trace()
         H = 2.4

@@ -316,8 +316,8 @@ class TwoModes(BK.PacedCaptions, ChapterScene):
 
     # =========================================================== L2: appendix A
     def appendix_a(self):
-        cols_x = (-6.05, -1.75, 2.2)
-        widths = (4.1, 3.8, 4.75)
+        cols_x = (-6.05, -1.8, 2.35)
+        widths = (4.0, 3.75, 4.6)
         head = VGroup(Tex(r"brain", color=WHITE), Tex(r"pipeline today", color=GREY_B), Tex(r"this spec", color=FB)).scale(0.72)
         for h, x in zip(head, cols_x):
             h.move_to([x, 3.0, 0], aligned_edge=LEFT)
