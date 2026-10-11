@@ -23,7 +23,7 @@ from mica_anim import bookends as BK  # noqa: E402
 from mica_anim import neuro as N  # noqa: E402
 from mica_anim.archmap import EDGES, FEEDFORWARD  # noqa: E402
 from mica_anim.chapter import ChapterScene, variants  # noqa: E402
-from mica_anim.style import FB, FF, INH, JUNC, MUTED, OD_COL, PixelFrame, image  # noqa: E402
+from mica_anim.style import FB, FF, INH, MUTED, OD_COL, PixelFrame, image  # noqa: E402
 
 IMG_H, IMG_C = 6.2, UP * 0.22
 

@@ -17,7 +17,7 @@ import zipfile
 from functools import lru_cache
 
 import numpy as np
-from manim import (DOWN, LEFT, RIGHT, UP, WHITE, AnimationGroup, Circle, Dot,
+from manim import (RIGHT, UP, WHITE, AnimationGroup, Circle, Dot,
                    ImageMobject, ManimColor, Transform, VGroup, VMobject)
 from manim.constants import RESAMPLING_ALGORITHMS
 from scipy.ndimage import distance_transform_edt, gaussian_filter

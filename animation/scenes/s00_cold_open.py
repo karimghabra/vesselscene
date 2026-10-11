@@ -121,7 +121,6 @@ class ColdOpen(BK.PacedCaptions, ChapterScene):
     # ---------------------------------------------------------------- construct
     def construct(self):
         self.intro()
-        S = BK.scene()
         pf = BK.scene_frame(IMG_H, IMG_C)
 
         # ======================================================= 1. the burst flickers
