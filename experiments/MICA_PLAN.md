@@ -18,33 +18,72 @@ what each layer is, and SPEC_V2.md (revision 2) records the design changes and t
 
 | | layers | state |
 |---|---|---|
-| built | 03 surround with the crossing fix; 06 readout per orientation; 07 end-stopped cells; 08 junction cells; 09 continuation; 10 transparency; 11 grouping cells; 13 fusion; 14 attentive grouping and linking; scale selection in V1 (new) | none scored against truth yet |
-| built, switched off | 04 recurrent field (too weak: it averages); 05 arc cells (`USE_ARCS`); joining by circle (`JOIN_BY_CIRCLE`) | |
+| built | 03 surround with the crossing fix; 06 readout per orientation; 07 end-stopped cells; 08 junction cells; 09 continuation; 10 transparency; 11 grouping cells; 13 fusion; 14 attentive grouping and linking; scale selection in V1 (new) | first scored against vesselscene truth, on two scenes (below) |
+| built, switched off | 04 recurrent field (too weak: it averages); 05 arc cells, restructured (`USE_ARCS`); joining by circle (`JOIN_BY_CIRCLE`, near chance) | |
 | not started | 12 flicker; 15-20 | |
 | phase 0 | done: the Django import, FFT padding, `checks.py`, `LAYERS_LOG.md`. Not done: probe sites, gallery, cache, annotated windows | |
 
 ### Order of work
 
-**In flight: the arc fix (layer 05).**
-- **Pool before the nonlinearity.** For each width, pool the short cells' line and edge responses along each arc,
-  then apply the edge inhibition, the noise division and the competition across widths and curvatures. The
-  curvature-0 arc is then exactly today's long cell.
-- **Edge sign at the wrap.** Negate the edge response where an arc's tangent wraps past 180 deg.
-- **Two readouts of one population.** The curvature-0 stack goes to V2 (layers 07-10); the best-over-curvature
-  stack goes to the readout and grouping.
-- **Passes when:**
-  - the curvature-0 control matches arcs off within 1-2 % on the real image;
+**Done: the arc fix (layer 05).** Line and edge responses are pooled along each arc per width before the edge
+inhibition, noise division and competition (`arcs.arc_scores`). One V1 run gives two chains: straight (curvature 0,
+read by layers 07-10) and arc (`C_arc`, read by the readout, fusion and grouping).
+- **The curvature-0 control:**
+  - matches arcs off within 1-2.4 % on the real image;
+  - the remaining difference comes from the arc kernel's 1 px sampling and its 2.6 sigma cut;
   - the synthetic T, Y and crossing are typed as before.
+- **Rings** of radius 60 / 30 / 15 px hold 82 / 76 / 75 % of a straight vessel's response, against 68 / 53 / 42 %
+  for long cells.
+- **The winning curvature K** gives the direction of a bend (sign agrees with the traced path on 68 % of points)
+  but not its size: it says r = 60 on a third of a straight vessel at 20 deg. It is not used for joining or for
+  population codes until that is fixed.
 
-  Then check the winning curvature against the traced path's own curvature.
+**First scores against vesselscene truth** (`scene_score.py`, average stills, 3 px tolerance; one scene of each
+kind, so no spread):
 
-**1. The vesselscene adapter** (`mica_pipeline.py`, in MICA; setup commands in SPEC_V2 section 9).
-- `annotate(image, valid)` returns polylines (x, y) and junctions (x, y, `'crossing'`, `'branch'` or
-  `'compound'`); one function per variant.
-- Run tier 2 from the vesselscene clone.
-- Compare the graph score and its terms with the original pipeline's 0.701 on the same five averages.
-- The per-junction scorecard, by type.
-- A scale check: the median width against the real burst's 7.5 px.
+| | healthy scene (1200 x 1920) | pathologic scene (480 x 768) |
+|---|---|---|
+| centreline recall / precision, arcs off | 0.844 / 0.892 | 0.586 / 0.839 |
+| centreline recall / precision, arcs on | 0.838 / 0.916 | 0.594 / 0.868 |
+| junction recall / precision | 0.54 / 0.77 | 0.61 / 0.70 |
+| junctions typed right (of those matched) | 51 % | 33 % |
+| purity of grouped vessels | about 0.7 | about 0.7 |
+
+- Arc cells raise centreline precision by 2-3 points on both scenes, and put more true vessels in one piece.
+- Junctions are the weak point. Purity is partly a definitional mismatch (step 1).
+
+**1. Score on the same footing as the original pipeline.** The adapter exists (`scene_score.py`, using
+`score_tracing`); it now needs the five development scenes, `score.py`'s graph score, the export rule and the
+purity split.
+- **The clone's branch.** `experiments/` (SPEC_V2.md, this plan, `score.py`, `run_experiment.py`,
+  `junction_gallery.py`) only exists on branch `claude/elegant-johnson-8n78yv`, not on `main`.
+- **Scenes and scorer:**
+  - generate the five development scenes (commands in SPEC_V2 section 9);
+  - make `annotate(image, valid)` follow `score.py`'s contract: polylines (x, y), and junctions (x, y,
+    `'crossing'`, `'branch'` or `'compound'`); one function per variant;
+  - run tier 2 from the clone;
+  - compare the graph score and its terms with the original pipeline's 0.701 on the same averages: centreline F1,
+    junction F1, coarse typing, crossing recall and precision, edge cover, pieces per edge, purity.
+  - `score_tracing` stays as an extra.
+- **The per-junction scorecard,** by type.
+- **A scale check:** the median width against the real burst's 7.5 px.
+- **Export rule.** Grouped vessels are cut at fork, T and compound junctions before they are scored or fitted;
+  identity is kept through crossings.
+  - vesselscene's vessels end at every fork ("at a fork the parent ends and two vessels begin"), and crossings are
+    not nodes.
+  - The graph and the spline fit need the same: edges that end at junction nodes.
+  - Attentive grouping may still follow a parent through a fork internally; only the export is cut.
+- **Purity split by relation.** For every place a grouped vessel moves from one true vessel to another, classify
+  the pair with the truth's graph and junction lineage, and report the share of pixels in each class:
+
+  | relation | meaning | error? |
+  |---|---|---|
+  | parent to child, through a fork | the grouping following the parent, as designed | definitional |
+  | child to child, across a fork | went the wrong way at the fork | yes |
+  | unrelated | switched at a crossing, or merged with a touching or parallel vessel | yes |
+
+  Only the last two rows are errors. They are the main target of the junction stages, with junction recall and
+  coarse typing.
 
 **2. The junction bench** (`junction_bench.py`): synthetic scenes with known junctions, scored in under a minute.
 - **Junction scenes:**
