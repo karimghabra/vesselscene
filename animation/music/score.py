@@ -45,7 +45,7 @@ def cues(cut: str) -> list[tuple[str, float, str, int, list | None]]:
         sec = duration(HERE / "media" / "videos" / Path(file).stem / "1080p30" / f"{scene}.mp4")
         if scene == "Trailer":
             out.append((scene, sec, "wonder", 99, TRAILER_ARC))
-        elif scene.startswith("End"):
+        elif scene in {"End" + suffix for suffix in V.LEVEL_SUFFIX.values()}:     # the end cards, not EndStopped
             out.append((scene, sec, "reflection", 7, [(0, 0.45), (0.5, 0.6), (1, 0.4)]))
         else:
             base = next(b for b in names if scene.startswith(b) and scene[len(b):] in V.LEVEL_SUFFIX.values())

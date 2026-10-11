@@ -145,7 +145,7 @@ def render_cut(cut: str, preview: bool, jobs: int, manim: str, skip_existing: bo
     return out
 
 
-def export(cut: str) -> list[Path]:
+def export(cut: str, audio_only: bool = False) -> list[Path]:
     """Compressed copies of a rendered cut (x264, CRF 28, tuned for animation:
     SSIM 0.996 against the render), in parts for the long cuts, with the
     cut's soundtrack when music/score.py has made one (AAC 96 kb/s)."""
@@ -166,6 +166,11 @@ def export(cut: str) -> list[Path]:
         dst = media / "cuts" / "export" / f"{name}.mp4"
         dst.parent.mkdir(parents=True, exist_ok=True)
         video = ["-c:v", "libx264", "-preset", "slow", "-tune", "animation", "-crf", "28", "-pix_fmt", "yuv420p"]
+        source = ["-f", "concat", "-safe", "0", "-i", str(lst)]
+        if audio_only and dst.exists():          # keep the encoded picture, replace only the soundtrack
+            kept = dst.with_suffix(".video.mp4")
+            dst.rename(kept)
+            source, video = ["-i", str(kept)], ["-c:v", "copy"]
         music = media / "cuts" / f"{cut}_music.wav"
         if music.exists():                       # this part's stretch of the cut's soundtrack (music/score.py)
             dur = sum(_seconds(p) for p in paths)
@@ -174,8 +179,10 @@ def export(cut: str) -> list[Path]:
                    "-af", f"afade=t=in:d=0.3,afade=t=out:st={max(dur - 0.6, 0):.3f}:d=0.6"]
         else:
             dur, audio, mix = sum(_seconds(p) for p in paths), [], []
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), *audio, *video,
-                        *mix, "-movflags", "+faststart", str(dst)], check=True)
+        subprocess.run(["ffmpeg", "-v", "error", "-y", *source, *audio, *video, *mix, "-movflags", "+faststart", str(dst)],
+                       check=True)
+        if source[1] != "concat":
+            Path(source[1]).unlink()
         offset += dur
         out.append(dst)
     return out
@@ -193,6 +200,7 @@ def main():
     ap.add_argument("--preview", action="store_true")
     ap.add_argument("--skip-existing", action="store_true", help="keep renders newer than their sources")
     ap.add_argument("--chapters", type=int, nargs="*", help="prerender: the chapters to render, every level a cut uses")
+    ap.add_argument("--audio-only", action="store_true", help="export: keep the encoded picture, replace the soundtrack")
     ap.add_argument("-j", "--jobs", type=int, default=2)
     ap.add_argument("--manim", default=os.environ.get("MANIM", "manim"))
     a = ap.parse_args()
@@ -205,7 +213,7 @@ def main():
     cuts = list(CUTS) if a.cut == "all" else [a.cut]
     for cut in cuts:
         if a.action == "export":
-            for p in export(cut):
+            for p in export(cut, a.audio_only):
                 print(p, f"{p.stat().st_size / 2**20:.1f} MiB")
             continue
         if a.action == "list":
