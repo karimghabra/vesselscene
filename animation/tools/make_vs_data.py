@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import time
 from pathlib import Path
 
@@ -78,7 +79,9 @@ def main():
             VS.IM.filling, VS.IM.form_image = filling, form
         frames.append(fr.images["frame"].astype(np.float32))
         print(f"frame {i}: {time.time() - t:.0f} s", flush=True)
-        np.savez_compressed(OUT / f"{tag}_burst.npz", frames=np.stack(frames))
+        tmp = OUT / f"{tag}_burst.tmp.npz"            # written whole, then swapped in: readers never see half a file
+        np.savez_compressed(tmp, frames=np.stack(frames))
+        os.replace(tmp, OUT / f"{tag}_burst.npz")
 
 
 if __name__ == "__main__":
