@@ -8,6 +8,108 @@ This is the working plan for the MICA code (`C:\Users\ihave\OneDrive\Documents\M
 Companion documents: `PIPELINE.md` explains the current pipeline step by step; `SPEC_V2.md` gives the design of each
 new layer (the biology, the computation, the gates). "SPEC 4.3" means section 4.3 of `SPEC_V2.md`.
 
+**Revised 11 October 2026.** Section 0 gives where things stand and the order of work from here. For the remaining
+work it replaces the phase order of section 5. Sections 3-5 stay as the reference for how a layer is developed and
+what each layer is, and SPEC_V2.md (revision 2) records the design changes and the measurements behind this order.
+
+## 0. Status and order of work (revised 11 October 2026)
+
+### Where things stand
+
+| | layers | state |
+|---|---|---|
+| built | 03 surround with the crossing fix; 06 readout per orientation; 07 end-stopped cells; 08 junction cells; 09 continuation; 10 transparency; 11 grouping cells; 13 fusion; 14 attentive grouping and linking; scale selection in V1 (new) | none scored against truth yet |
+| built, switched off | 04 recurrent field (too weak: it averages); 05 arc cells (`USE_ARCS`); joining by circle (`JOIN_BY_CIRCLE`) | |
+| not started | 12 flicker; 15-20 | |
+| phase 0 | done: the Django import, FFT padding, `checks.py`, `LAYERS_LOG.md`. Not done: probe sites, gallery, cache, annotated windows | |
+
+### Order of work
+
+**In flight: the arc fix (layer 05).**
+- **Pool before the nonlinearity.** For each width, pool the short cells' line and edge responses along each arc,
+  then apply the edge inhibition, the noise division and the competition across widths and curvatures. The
+  curvature-0 arc is then exactly today's long cell.
+- **Edge sign at the wrap.** Negate the edge response where an arc's tangent wraps past 180 deg.
+- **Two readouts of one population.** The curvature-0 stack goes to V2 (layers 07-10); the best-over-curvature
+  stack goes to the readout and grouping.
+- **Passes when:**
+  - the curvature-0 control matches arcs off within 1-2 % on the real image;
+  - the synthetic T, Y and crossing are typed as before.
+
+  Then check the winning curvature against the traced path's own curvature.
+
+**1. The vesselscene adapter** (`mica_pipeline.py`, in MICA; setup commands in SPEC_V2 section 9).
+- `annotate(image, valid)` returns polylines (x, y) and junctions (x, y, `'crossing'`, `'branch'` or
+  `'compound'`); one function per variant.
+- Run tier 2 from the vesselscene clone.
+- Compare the graph score and its terms with the original pipeline's 0.701 on the same five averages.
+- The per-junction scorecard, by type.
+- A scale check: the median width against the real burst's 7.5 px.
+
+**2. The junction bench** (`junction_bench.py`): synthetic scenes with known junctions, scored in under a minute.
+- **Junction scenes:**
+  - crossings at 20-90 deg;
+  - forks and T's with the branch at 20-100 % of the parent's contrast and 30-100 % of its width;
+  - a branch stopping short of its parent;
+  - a fork on a curve.
+- **Non-junction scenes:** an uneven vessel, a line end, a parallel pair, a bend, texture, empty noise.
+- **Detectors,** with one interface (row, col, type, arms):
+  - A: today's layers 07-10, with a divisive end-stopped cell `[A- - beta A+]+ / (A- + A+ + c)` and its own weight
+    for the end-to-bipole inhibition;
+  - B: population: two or more separate orientation peaks at a point (Hansen and Neumann 2004);
+  - C: forks found while tracking: two or more supported directions ahead of a trace;
+  - D (topology in position x orientation): only if B and C leave a gap.
+
+**3. Recurrence as a second factor of the bench.** Every detector runs on:
+- **R0:** today's association field.
+- **R1:** a stronger recurrence, up to 8 rounds:
+  - lobes 1-2 px wide;
+  - support as a saturating gain on the feedforward input, plus a little gap filling;
+  - inhibition from orientations within 22.5 deg;
+  - divisive normalisation by the local untuned pool.
+- **R2:** R1 plus feedback from the junction cells. Every 2 rounds, each junction boosts its arms' orientations in
+  V1 and damps the others inside its disc; junctions that lose their arms are dropped.
+
+Expect R1 to cut false junctions on texture and sharpen the arms, and R2 to help faint branches and weak spots near
+junctions. Weak spots along a plain vessel are the divisive end cell's job, not the recurrence's.
+
+**4. The junction-centreline loop** (`junction_loop.py`), repeated until nothing changes (at most 5 rounds).
+- **Top-down, junctions refine centrelines:**
+  - extend branches to the centre, and split through-traces at junctions;
+  - re-place the centre where the arms' lines meet;
+  - inside the disc, use the arms, not the crest;
+  - carry identity straight through crossings.
+- **Bottom-up, centrelines refine junctions:**
+  - re-measure the arms on the traces outside the disc;
+  - drop arms with no trace, and junctions left with fewer than 3 arms;
+  - re-type; merge or split;
+  - add T's where a trace end meets another vessel's side.
+- **Bench numbers:** junction centre error, arm direction error, centreline offset near junctions, branches joined
+  to their parents, identity through crossings.
+- `vessels._bridge_ends` retires when the loop's T's beat it.
+
+**5. Smaller fixes, in the order the scores rank them.**
+- Fusion fragments: seed from line evidence only, and let the fused evidence only extend traces.
+- Identity breaks: a labelling pass over the parallel readout; or, in `attend`, claim only beside the path and merge
+  instead of stopping.
+- Scale selection's false Y where a wide vessel tapers into a thin one.
+- Which width-measurement pass is right.
+
+**For Karim, at any time**
+- Mark 2-3 windows of a real average completely: every junction with its type, every vessel end
+  (`output/junctions.json`).
+- Put MICA under git, so every score is tied to a commit.
+
+**Later**
+- Phase 6: graph and spline fit on real frames, through the adapter in the other direction (layers 15, 16).
+- Then 12 flicker, 17 top-down feedback, 18 population codes, 19 surface completion, 20 flow direction.
+
+**Decided**
+- Joining by circle stays off. Of the facing pairs, 15 % lie within 10 deg of the co-circular diagonal, against
+  11 % for random angles: most are not continuations.
+- Every step is scored on the bench and, once step 1 exists, on vesselscene. Nothing old is retired before its
+  replacement wins there.
+
 ## Words used here
 
 | term | meaning |
@@ -235,17 +337,17 @@ Each layer card (section 5) lists its own numbers. They come from two places.
 - **size of the output**: mask area, pieces, centreline length, junction counts;
 - **run time**.
 
-**vesselscene, against the truth.** An adapter in the vesselscene repository (`experiments/mica/adapter.py`) runs the
-MICA functions on a scene's average. It converts their outputs into what the existing scorers take: centreline
-raster, junction list with types, traces. It reports:
+**vesselscene, against the truth.** An adapter in MICA (`mica_pipeline.py`) follows the pipeline contract of
+vesselscene's `score.py`, `annotate(image, valid)`, and is run from a vesselscene clone with `run_experiment` (setup
+in SPEC_V2 section 9). It converts MICA's outputs into what the scorers take: polylines, and junctions with types.
+It reports:
 - centreline precision, recall and F1;
 - the per-junction scorecard (found, typed, by type), as `junction_gallery.judge`;
 - the probe battery's junction sweeps (`fork`, `t`, `crossing_angle`, `crossing_depth`, `crossing_width`, `end`,
   `empty`);
 - the layer-specific numbers listed on each card.
 
-The adapter imports MICA from the path in the `MICA_PATH` environment variable. So there is one implementation,
-yours, and vesselscene only scores it.
+MICA is on the run's `PYTHONPATH`, so there is one implementation, yours, and vesselscene only scores it.
 
 ## 4. Phase 0: housekeeping, baseline and figure tools (no change in behaviour)
 
@@ -341,8 +443,15 @@ order of the phases.
 | 18_population | population codes as start values for the fit | 4.12 | 7 | – |
 | 19_surface | background completed only behind vessel evidence | 4.13 | 7 | the OD threshold in the background mask |
 | 20_direction | flow direction along each vessel | 4.14 | 7 | – |
+| 03b_scale (new) | scale selection: finer cells inhibit coarser ones past a thin vessel's end | 4.6b | built | – |
+| 05_arcs (redesigned) | arc cells: short cells pooled along arcs; one population, read straight by V2 and best-over-curvature by the readout | 4.8 | in flight | the long simple cells |
+| 08b_population (new) | junction detector B: separate orientation peaks at a point | – | section 0, step 2 | – |
+| 08c_fork_tracking (new) | junction detector C: supported directions ahead of a trace | – | section 0, step 2 | – |
+| 14b_linking (new) | linking facing label ends | 4.10b | built | – |
+| 14c_junction_loop (new) | junctions and centrelines refining each other | – | section 0, step 4 | `vessels._bridge_ends` |
 
-Two changes from the first version of this plan:
+The rows marked new or redesigned were added on 11 October 2026; section 0 gives their order. Two earlier changes
+from the first version of this plan:
 - **The surround's crossing fix (SPEC 4.6) moves into phase 1.** Like the readout, it is about keeping crossings, and
   the readout cannot keep a crossing the surround has already removed.
 - **Local model comparison (SPEC 4.5b) moves from phase 2 to phase 6.** It renders hypotheses, and MICA has no
@@ -786,12 +895,10 @@ scenes, so flicker can be scored against truth.
 
 ## 7. Who builds what
 
-- **In MICA (you):** the layers, their figures and `dev.py` cells, `checks.py`, and the sites and gallery tools.
-- **In vesselscene (I can do this):**
-  - the adapter that runs the MICA functions on the development scenes and scores them;
-  - `sites_from_truth`;
-  - burst rendering for phase 4;
-  - the scorecards.
+- **In MICA (you and your agent):** the layers, their figures and `dev.py` cells, `checks.py`, the junction bench,
+  and the vesselscene adapter (`mica_pipeline.py`, section 0, step 1), run from a local vesselscene clone.
+- **In vesselscene (I can do this):** the scorers, the spec, `sites_from_truth`, and burst rendering for flicker
+  (layer 12).
 
   Once MICA is on GitHub and added to a session, I can also review each layer against the spec and run the
   vesselscene scoring on each commit.
