@@ -74,7 +74,18 @@ the junction story, which is the spec's main goal, and form the short cut.
 | 17 | Motion: flicker and flow | 4.14 | Red-cell columns and plasma gaps flow, and the flicker map uses the robust temporal spread minus camera noise. Along one vessel, the space-time image D(s, t) shows oriented streaks, and spatiotemporal energy filters (Adelson-Bergen) read them as direction and speed. At a 3-way junction the arrows separate a bifurcation from a confluence, which a still cannot do. | | 2.5 |
 | 18 | **The whole loop, and how we'd know it works** | 4.1, 6.2, 6.4, 1.1 | The map runs end to end: feedforward, then the recurrent loops. The two gates follow, synthetic against truth and real without truth, along with the inverse crime (the same tube model renders and fits). The build status map shows each layer as built, off, designed or not started. Close on the annotated image. | ● | 2.0 |
 
-Full cut is about 40 minutes. The core cut (●) is about 25 minutes.
+## The four cuts
+
+Each chapter is written once, with three depths (`mica_anim/chapter.py`):
+level 1 (short) shows one idea, level 2 (medium) adds the equation and mechanism, and level 3 (detailed) adds
+the spec's measurements, variants and caveats. `versions.py` assembles the cuts:
+
+| cut | content | length |
+|---|---|---|
+| very short | `s99_trailer.py`: one beat per idea | ~1.5 min |
+| short | chapters 0, 1, 2, 4, 8, 9, 10, 11, 14, 18 at level 1 | ~5 min |
+| medium | the core chapters (●) at level 2 | ~15 min |
+| detailed | all chapters at level 3, with the architecture map before each and the references at the end | ~40 min |
 
 ## Proof of concept (built)
 
@@ -93,11 +104,11 @@ hypercolumn:
 
 ## Build order
 
-1. Foundation: `mica_anim/` style, widgets and computation core (done).
-2. Core chapters, in order (0, 1, 2, 7, 8, 9, 10, 11, 14, 16, 18). Each is rendered
-   at 480p for review, then at 1080p60.
-3. The remaining chapters (3, 5, 6, 12, 13, 15, 17).
-4. Assembly with ffmpeg: chapter cards and a contents bar, then a 1080p60 master.
+1. Foundation: `mica_anim/` style, widgets, the computation core, chapter levels,
+   the architecture map, vesselscene data (done).
+2. All chapters at three levels, reviewed at 480p.
+3. The trailer and end cards.
+4. Final renders at 1080p30, then each cut joined with ffmpeg (`python versions.py render all`).
 
 ## Layout
 
