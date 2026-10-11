@@ -59,6 +59,7 @@ what each layer is, and SPEC_V2.md (revision 2) records the design changes and t
   - B: population: two or more separate orientation peaks at a point (Hansen and Neumann 2004);
   - C: forks found while tracking: two or more supported directions ahead of a trace;
   - D (topology in position x orientation): only if B and C leave a gap.
+- **Star scenes** for step 4b: 5-8 arms, through-vessels at different depths (blur), arms ending in a core.
 
 **3. Recurrence as a second factor of the bench.** Every detector runs on:
 - **R0:** today's association field.
@@ -87,6 +88,31 @@ junctions. Weak spots along a plain vessel are the divisive end cell's job, not 
 - **Bench numbers:** junction centre error, arm direction error, centreline offset near junctions, branches joined
   to their parents, identity through crossings.
 - `vessels._bridge_ends` retires when the loop's T's beat it.
+
+**4b. Compound junctions: decomposing stars** (after the loop, whose traces supply the arms). A junction whose core
+is wider than a vessel, or that has 5 or more arms, is decomposed rather than only labelled 'compound'. Examples:
+a venous confluence, or a star of vessels converging at different depths.
+- **Size from the core.** The junction's radius is the extent of its dark core (OD above half the arms' contrast, or
+  the grouping cells' half-width), not 4 px plus half a width. The surround suppresses a round core as a blob, so
+  the core is found on the OD, not in the line evidence.
+- **Arms from the traces** leaving the core, measured 1-3 widths outside it, where they have diverged: direction,
+  width, contrast and blur for each.
+- **A depth class per arm:** blur relative to width. Deeper vessels are blurrier and fainter.
+- **Matching.** Each arm either pairs with one other arm (a vessel passing through) or ends in the core (a vessel
+  draining into it).
+  - Pair score: continuation (turn, width) x similarity of depth.
+  - Each arm has a cost for ending in the core.
+  - Maximum-weight matching, exact for up to about 10 arms.
+- **Core check.** Predicted core darkness against the measured one: a union for the arms ending there, plus a sum
+  for through-vessels at other depths.
+- **Close calls:** render the top matchings and keep the best (local model comparison, layer 16, once the renderer
+  exists).
+- **Identity:** attentive grouping enters by each arm and leaves by its partner; a label on an ending arm stops in
+  the core.
+- **Output:** the compound with its structure: through-pairs, arms ending in the core, and depth order.
+- **Scored against** vesselscene's image-junction truth (`junctions_average.json`): each junction's arms (direction,
+  width, blur, depth) and its `partition` (arms grouped by vessel). Bench: star scenes of 5-8 arms, through-vessels
+  at different depths (blur), and arms ending in a core.
 
 **5. Smaller fixes, in the order the scores rank them.**
 - Fusion fragments: seed from line evidence only, and let the fused evidence only extend traces.
@@ -449,6 +475,7 @@ order of the phases.
 | 08c_fork_tracking (new) | junction detector C: supported directions ahead of a trace | – | section 0, step 2 | – |
 | 14b_linking (new) | linking facing label ends | 4.10b | built | – |
 | 14c_junction_loop (new) | junctions and centrelines refining each other | – | section 0, step 4 | `vessels._bridge_ends` |
+| 14d_compound (new) | decomposing compound junctions: arms matched into through-vessels and endings, with depth | – | section 0, step 4b | – |
 
 The rows marked new or redesigned were added on 11 October 2026; section 0 gives their order. Two earlier changes
 from the first version of this plan:
