@@ -69,3 +69,25 @@ python versions.py render all --skip-existing -j 3           # 1080p30, then joi
 ```
 
 Each cut lands in `media/cuts/<cut>.mp4`. `media/` is git-ignored.
+
+## Music
+
+The soundtrack is original. `music/compose.py` writes one cue per chapter,
+composed to the chapter's exact length:
+
+- **Harmony:** a mood's key, tempo and diatonic progression, ending on a cadence
+  to its tonic as the chapter ends.
+- **Parts:** piano bass and arpeggios, strings, and a sparse melody, with layers
+  following an intensity arc.
+- **Motif:** a recurring motif in the opening, the trailer and the finale.
+
+FluidSynth plays the cues with the FluidR3_GM soundfont (MIT licence).
+`music/score.py` joins the cues of a cut, high-passes the mix at 60 Hz and
+normalises it to -18 LUFS. It then lays the result under the rendered video, and
+`versions.py export` carries it into the compressed copies.
+
+```bash
+sudo apt-get install fluidsynth fluid-soundfont-gm && pip install mido
+python music/score.py all        # after versions.py render: media/cuts/<cut>_music.mp4
+python versions.py export all    # compressed copies with the soundtrack
+```

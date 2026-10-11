@@ -147,11 +147,12 @@ def render_cut(cut: str, preview: bool, jobs: int, manim: str, skip_existing: bo
 
 def export(cut: str) -> list[Path]:
     """Compressed copies of a rendered cut (x264, CRF 28, tuned for animation:
-    SSIM 0.996 against the render), in parts for the long cuts."""
+    SSIM 0.996 against the render), in parts for the long cuts, with the
+    cut's soundtrack when music/score.py has made one (AAC 96 kb/s)."""
     media = HERE / "media"
     c = CUTS[cut]
     groups = PARTS.get(cut, [c["chapters"]])
-    out = []
+    out, offset = [], 0.0
     for i, chapters in enumerate(groups, 1):
         todo = scenes(cut)
         if c["level"] is not None:
@@ -164,11 +165,25 @@ def export(cut: str) -> list[Path]:
         lst.write_text("".join(f"file '{p}'\n" for p in paths))
         dst = media / "cuts" / "export" / f"{name}.mp4"
         dst.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), "-c:v", "libx264",
-                        "-preset", "slow", "-tune", "animation", "-crf", "28", "-pix_fmt", "yuv420p",
-                        "-movflags", "+faststart", str(dst)], check=True)
+        video = ["-c:v", "libx264", "-preset", "slow", "-tune", "animation", "-crf", "28", "-pix_fmt", "yuv420p"]
+        music = media / "cuts" / f"{cut}_music.wav"
+        if music.exists():                       # this part's stretch of the cut's soundtrack (music/score.py)
+            dur = sum(_seconds(p) for p in paths)
+            audio = ["-ss", f"{offset:.3f}", "-t", f"{dur:.3f}", "-i", str(music)]
+            mix = ["-map", "0:v", "-map", "1:a", "-c:a", "aac", "-b:a", "96k", "-shortest",
+                   "-af", f"afade=t=in:d=0.3,afade=t=out:st={max(dur - 0.6, 0):.3f}:d=0.6"]
+        else:
+            dur, audio, mix = sum(_seconds(p) for p in paths), [], []
+        subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "concat", "-safe", "0", "-i", str(lst), *audio, *video,
+                        *mix, "-movflags", "+faststart", str(dst)], check=True)
+        offset += dur
         out.append(dst)
     return out
+
+
+def _seconds(path: Path) -> float:
+    return float(subprocess.check_output(["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                                          "-of", "csv=p=0", str(path)]))
 
 
 def main():

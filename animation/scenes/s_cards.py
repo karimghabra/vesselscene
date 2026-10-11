@@ -58,6 +58,7 @@ class _End(Scene):
             _line(r"Every image, map and curve is computed from the spec's equations on toy stimuli;", 0.5, GREY_B),
             _line(r"numbers marked \emph{measured} are quoted from the spec.", 0.5, GREY_B),
             _line(r"Vessel imagery and its truth: vesselscene (synthetic conjunctival stills and bursts).", 0.5, GREY_B),
+            _line(r"Music: original, composed by rule for this video; instruments from the FluidR3\_GM soundfont.", 0.5, GREY_B),
             _line(r"Animated with Manim Community.", 0.5, GREY_B),
         ).arrange(DOWN, buff=0.22)
         g = VGroup(title, rule, lines).arrange(DOWN, buff=0.35)
