@@ -8,7 +8,7 @@ idea across the whole video:
   feedforward  -> FF  (blue)        feedback / recurrent -> FB (gold)
   line ends    -> END (orange)      junctions -> JUNC (pink)
   continuation -> CONT (green)      attention label -> ATTN (yellow)
-  OD / blood   -> BLOOD (deep red)
+  OD / blood   -> BLOOD (deep red); OD_COL in equations
 """
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ JUNC = PINK
 CONT = GREEN_C
 ATTN = YELLOW
 BLOOD = ManimColor("#C0392B")
+OD_COL = ManimColor("#FF7B6B")   # OD in equations: lighter than BLOOD, readable on black
 MUTED = GREY_B
 
 
