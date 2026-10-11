@@ -197,9 +197,9 @@ class ScaleSelection(ChapterScene):
         # ------------------------------------------------------------ 2. end zones and a centre pool
         self.play(FadeOut(end_lbl), FadeOut(over_lbl), run_time=0.5)
         self.say(r"The fix: let the fine cells veto. Those in the coarse cell's two end zones inhibit it; those at its centre cancel that.")
-        xc.set_value(40.0)
+        xc.set_value(50.0)
         coarse_rf.clear_updaters()
-        self.play(coarse_rf.animate.move_to(px(40.0)), run_time=1.0)
+        self.play(coarse_rf.animate.move_to(px(50.0)), run_time=1.0)
         outline = coarse_rf[0]
         self.play(*[FadeOut(m) for m in coarse_rf[1:]], outline.animate.set_stroke(COARSE_COL, opacity=0.6),
                   img.animate.set_opacity(0.35), run_time=0.8)
@@ -229,7 +229,6 @@ class ScaleSelection(ChapterScene):
         self.play(coarse_trace.animate.set_stroke(opacity=0.45), fine_trace.animate.set_stroke(opacity=0.45),
                   FadeIn(keys2), run_time=0.8)
         self.add(sel_trace, inh_trace)
-        self.play(xc.animate.set_value(20.0), run_time=0.4)
         rw = "read" if self.at(2) else 2.0
         self.play(xc.animate.set_value(70.0), run_time=2.0 if self.at(2) else 1.2, rate_func=linear)
         self.say(r"On a continuous vessel the end zones and the centre see the same fine cells. The pools are equal: nothing is lost.", wait=rw)

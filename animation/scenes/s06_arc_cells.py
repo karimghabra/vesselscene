@@ -231,7 +231,7 @@ class ArcCells(ChapterScene):
         self.play(kt.animate.set_value(-0.1), run_time=2.0)
         trace_lo.set_value(-0.1)
         self.add(trace)
-        self.play(kt.animate.set_value(0.1), run_time=6.0, rate_func=linear)
+        self.play(kt.animate.set_value(0.1), run_time=6.0 if self.at(2) else 4.0, rate_func=linear)
         self.play(kt.animate.set_value(1 / R_PROBE), run_time=1.5)
         peak = DashedLine(kax.c2p(1 / R_PROBE, 0), kax.c2p(1 / R_PROBE, resp_at(1 / R_PROBE)), color=YELLOW, stroke_width=2)
         peak_l = MathTex(r"\kappa = 1/r", color=YELLOW).scale(0.55).next_to(kax.c2p(1 / R_PROBE, 0), UP, buff=0.12).shift(RIGHT * 0.55)

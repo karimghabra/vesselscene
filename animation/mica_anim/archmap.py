@@ -10,7 +10,7 @@ Boxes are keyed so chapters can light their own:
 from __future__ import annotations
 
 import numpy as np
-from manim import (DOWN, LEFT, RIGHT, UP, WHITE, AnimationGroup, Arrow, CurvedArrow, GREY_B,
+from manim import (DOWN, LEFT, RIGHT, UP, WHITE, AnimationGroup, Arrow, CurvedArrow, GREY_B, Transform,
                    RoundedRectangle, Tex, VGroup)
 
 from .style import FB, FF, MUTED
@@ -46,6 +46,16 @@ EDGES = [("retina", "ganglion"), ("ganglion", "simple"), ("simple", "arc"), ("ar
          ("border", "fusion"), ("fusion", "readout"), ("contin", "attend"), ("readout", "attend"),
          ("attend", "graph"), ("graph", "render"), ("graph", "popcode"), ("popcode", "fit")]
 FEEDBACK = [("render", "assoc"), ("fit", "assoc")]
+
+
+def _dimmed(arrows, dim):
+    """A copy of a group of arrows with stroke and tips faded (set_opacity would
+    also fill the curved ones into lens shapes)."""
+    out = arrows.copy()
+    for a in out:
+        a.set_stroke(opacity=dim)
+        a.tip.set_fill(opacity=dim).set_stroke(opacity=dim)
+    return out
 
 
 class ArchitectureMap(VGroup):
@@ -103,7 +113,8 @@ class ArchitectureMap(VGroup):
             else:
                 anims.append(box[0].animate.set_stroke(opacity=dim).set_fill(opacity=0.02))
                 anims.append(box[1].animate.set_opacity(dim))
-        anims.append(self.arrows.animate.set_opacity(dim))
+        anims.append(Transform(self.arrows, _dimmed(self.arrows, dim)))
         if not keys & {"feedback", "render", "fit"}:
-            anims.append(self.feedback.animate.set_opacity(dim))
+            anims.append(Transform(self.feedback, _dimmed(self.feedback, dim)))
+            anims.append(self.labels[2].animate.set_opacity(dim))
         return AnimationGroup(*anims)

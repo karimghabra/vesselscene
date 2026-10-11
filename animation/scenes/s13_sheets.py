@@ -284,17 +284,19 @@ class Sheets(ChapterScene):
             q = GR.RO_CENTRE + 5.0 * st["uf"]
             vals = C[:, int(round(q[1])), int(round(q[0]))]
             ring = Circle(radius=0.12, stroke_color=WHITE, stroke_width=3).move_to(pfL.point(*q))
-            ch = bar_chart(vals, width=4.6, height=2.3, vmax=float(vals.max()) * 1.1,
-                           colors=[orientation_color(t) for t in N.THETAS]).move_to(R + DOWN * 0.3)
+            ch = bar_chart(vals, width=4.2, height=2.3, vmax=float(vals.max()) * 1.1,
+                           colors=[orientation_color(t) for t in N.THETAS]).move_to(R + DOWN * 0.3 + LEFT * 0.5)
             kbest = int(np.argmax(vals))
             bt = Tex(r"the 16 values at that pixel, 5 px from the crossing").scale(0.48).next_to(ch, UP, buff=0.3)
-            b1 = Tex(r"best orientation: the strong vessel's side", color=orientation_color(N.THETAS[kbest])).scale(0.42)
-            b2 = Tex(r"the faint vessel's own sheet: discarded", color=orientation_color(N.THETAS[k_f])).scale(0.42)
-            VGroup(b1, b2).arrange(DOWN, aligned_edge=RIGHT, buff=0.12).next_to(ch, DOWN, buff=0.25).align_to(ch, RIGHT)
-            ar1 = Arrow(b1.get_right() + RIGHT * 0.05, ch[1][kbest].get_bottom() + DOWN * 0.02, buff=0.05, stroke_width=2,
-                        color=orientation_color(N.THETAS[kbest]), max_tip_length_to_length_ratio=0.15)
-            ar2 = Arrow(b2.get_left() + LEFT * 0.05, ch[1][k_f].get_bottom() + DOWN * 0.02, buff=0.05, stroke_width=2,
-                        color=orientation_color(N.THETAS[k_f]), max_tip_length_to_length_ratio=0.15)
+            b1 = Tex(r"best: toward the\\strong vessel", color=orientation_color(N.THETAS[kbest])).scale(0.42)
+            b2 = Tex(r"the faint vessel's\\own sheet: discarded", color=orientation_color(N.THETAS[k_f])).scale(0.42)
+            top1, top2 = ch[1][kbest].get_top(), ch[1][k_f].get_top()
+            b1.next_to(ch, RIGHT, buff=0.15).set_y(top1[1])
+            b2.move_to([ch.get_left()[0] + 1.6, top2[1] + 0.15, 0])
+            ar1 = Arrow(b1.get_left() + LEFT * 0.02, top1 + RIGHT * 0.05, buff=0.04, stroke_width=2,
+                        color=orientation_color(N.THETAS[kbest]), max_tip_length_to_length_ratio=0.2)
+            ar2 = Arrow(b2.get_right() + RIGHT * 0.02, top2 + LEFT * 0.05, buff=0.04, stroke_width=2,
+                        color=orientation_color(N.THETAS[k_f]), max_tip_length_to_length_ratio=0.2)
             b1, b2 = VGroup(b1, ar1), VGroup(b2, ar2)
             self.say(r"Why: on the faint vessel near the crossing, the strong vessel's lobe is the larger, so the best"
                      r" orientation is the strong one's.")
@@ -344,7 +346,7 @@ class Sheets(ChapterScene):
         line.set_x(tbl.get_x())
         self.say(r"The missing stretch, on the spec's four synthetic crossings: worst when one vessel is faint and the angle shallow.")
         self.play(FadeIn(head), FadeIn(tbl), Create(line), run_time=1.2)
-        self.wait(2.0)
+        self.wait(3.0 if self.at(3) else 2.0)
         note = Tex(r"The toy shows the same order, with shorter stretches: the spec's numbers come from Karim's earlier readout.",
                    color=GREY_B).scale(0.45).next_to(tbl, DOWN, buff=0.3)
         self.say(r"Measured on Karim's earlier readout; this toy's filters are shorter, so its stretches are shorter, in the same order.",
@@ -383,7 +385,8 @@ class Sheets(ChapterScene):
         segs = VGroup()
         for i in range(len(xy) - 1):
             segs.add(Line(pf.point(*xy[i]), pf.point(*xy[i + 1]), stroke_color=orientation_color(N.THETAS[ks[i]]), stroke_width=5))
-        self.play(Create(segs), run_time=3.0, rate_func=linear)
+        self.play(Create(segs), run_time=3.5, rate_func=linear)
+        self.wait(1.0)
         # decoded orientation against the tangent
         ax = Axes(x_range=[0, 240, 60], y_range=[-40, 40, 20], x_length=8.0, y_length=1.9, tips=False,
                   axis_config=dict(color=MUTED, stroke_width=1.5, font_size=20),
@@ -407,7 +410,7 @@ class Sheets(ChapterScene):
         res.next_to(ax, DOWN, buff=0.2)
         self.say(r"On a synthetic sine, the reported orientation matches the tangent within about $2^\circ$ (spec 4.9c).")
         self.play(FadeIn(res))
-        self.wait(3.0)
+        self.wait(4.0)
         self.clear()
 
     def real_numbers(self):
@@ -427,7 +430,7 @@ class Sheets(ChapterScene):
         self.play(FadeIn(im), Create(fr), FadeIn(tt), run_time=0.8)
         self.play(Create(tracks), run_time=2.5, rate_func=linear)
         self.play(Create(ring))
-        self.wait(1.5)
+        self.wait(2.5)
 
         cells = [Tex(""), Tex(r"old tracker"), Tex(r"per orientation", color=GREEN_C),
                  Tex(r"centreline"), Tex(r"54,764 px"), Tex(r"71,475 px", color=GREEN_C),
@@ -445,7 +448,7 @@ class Sheets(ChapterScene):
         self.wait(2.5)
         self.say(r"Crossings now carry two tracks: 94\% of junction candidates do. The price: 1\% of plain vessel points doubled.")
         self.play(FadeIn(more, lag_ratio=0.2), run_time=1.2)
-        self.wait(3.0)
+        self.wait(4.0)
 
 
 variants(Sheets, module_globals=globals())
