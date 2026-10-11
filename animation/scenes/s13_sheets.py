@@ -214,18 +214,28 @@ class Sheets(ChapterScene):
         k_f = ms["k_f"]
         H = 3.55
         L, R = np.array([-3.6, 0.55, 0]), np.array([3.6, 0.55, 0])
-        pfL, pfR = PixelFrame(GR.RO_SHAPE, H, L), PixelFrame(GR.RO_SHAPE, H, R)
+        c0, n = 30, 60                                   # zoom: a 60 px window around the crossing
+        crop = (slice(c0, c0 + n), slice(c0, c0 + n))
+        pfL0, pfR0 = PixelFrame((n, n), H, L), PixelFrame((n, n), H, R)
+
+        class _PF:                                       # image pixel -> scene, through the crop
+            def __init__(self, pf):
+                self.pf, self.unit = pf, pf.unit
+
+            def point(self, x, y):
+                return self.pf.point(x - c0, y - c0)
+        pfL, pfR = _PF(pfL0), _PF(pfR0)
         # the collapsed map: hue of the best orientation, brightness of its value
         M, kb = ms["M"], ms["kb"]
         v = np.clip(M / VMAX, 0, 1) ** 0.6
         hues = np.stack([np.array(orientation_color(t).to_rgb()) for t in N.THETAS])
         cols = hues[kb]
-        arr = np.concatenate([cols * 0.75 * v[..., None], np.ones(M.shape + (1,))], -1)
+        arr = np.concatenate([cols * 0.75 * v[..., None], np.ones(M.shape + (1,))], -1)[crop]
         cmap = rgba((arr * 255).astype(np.uint8))
         cmap.height = H
         cmap.move_to(L)
         cfr = SurroundingRectangle(cmap, buff=0, color=MUTED, stroke_width=1)
-        ct = Tex(r"collapsed: the best orientation per pixel\\(the old step 6)").scale(0.5).next_to(cmap, UP, buff=0.15)
+        ct = Tex(r"collapsed: the best orientation per pixel\\(the old step 6; zoomed on the crossing)").scale(0.5).next_to(cmap, UP, buff=0.15)
         self.say(r"The old step 6 collapsed the stack to the best orientation per pixel before tracing.")
         if self.at(2):
             src, outl = m["pile"], m["outlines"]
@@ -243,7 +253,7 @@ class Sheets(ChapterScene):
         cls = np.full(M.shape + (3,), 0.45)
         cls[GR._kdist(kb, k_f) <= 1] = hues[k_f]
         cls[GR._kdist(kb, k_s) <= 1] = hues[k_s]
-        rc = rgba(ridge_overlay(thick(ms["Rc"]), colors=cls))
+        rc = rgba(ridge_overlay(thick(ms["Rc"])[crop], colors=cls[crop]))
         rc.height = H
         rc.move_to(L)
         self.play(FadeIn(rc), run_time=0.8)
@@ -252,10 +262,10 @@ class Sheets(ChapterScene):
         p0 = GR.RO_CENTRE + g.min() * st["uf"]
         p1 = GR.RO_CENTRE + g.max() * st["uf"]
         nrm = np.array([-st["uf"][1], st["uf"][0]])
-        a0, a1 = pfL.point(*(p0 + 7 * nrm)), pfL.point(*(p1 + 7 * nrm))
+        a0, a1 = pfL.point(*(p0 - 6 * nrm)), pfL.point(*(p1 - 6 * nrm))
         gap_line = VGroup(Line(a0, a1, stroke_color=INH, stroke_width=4),
-                          Line(a0, pfL.point(*(p0 + 3 * nrm)), stroke_color=INH, stroke_width=3),
-                          Line(a1, pfL.point(*(p1 + 3 * nrm)), stroke_color=INH, stroke_width=3))
+                          Line(a0, pfL.point(*(p0 - 2 * nrm)), stroke_color=INH, stroke_width=3),
+                          Line(a1, pfL.point(*(p1 - 2 * nrm)), stroke_color=INH, stroke_width=3))
         gl = Tex(rf"no crest of its own: {ms['collapsed']:.1f} px (toy)", color=INH).scale(0.48)
         gl.next_to(cmap, DOWN, buff=0.12)
         self.say(r"Near the crossing the strong vessel wins every pixel: the faint one has no crest at its own orientation, and its track is cut.")
@@ -263,9 +273,9 @@ class Sheets(ChapterScene):
         self.wait(1.0 if self.short else 1.6)
         extra = VGroup()
         if self.at(2):
-            rings = VGroup(*[Circle(radius=0.2, stroke_color=JUNC, stroke_width=3).move_to(pfL.point(*(GR.RO_CENTRE + t * st["uf"])))
+            rings = VGroup(*[Circle(radius=0.28, stroke_color=JUNC, stroke_width=3).move_to(pfL.point(*(GR.RO_CENTRE + t * st["uf"])))
                              for t in (g.min() - 1.0, g.max() + 1.0)])
-            tl = VGroup(*[Tex("T", color=JUNC).scale(0.5).next_to(r, nd, buff=0.04) for r, nd in zip(rings, (DL, UR))])
+            tl = VGroup(*[Tex("T", color=JUNC).scale(0.6).next_to(r, nd, buff=0.04) for r, nd in zip(rings, (RIGHT, LEFT))])
             self.say(r"So each such vessel is cut in two, and reads as two T-junctions.")
             self.play(Create(rings), FadeIn(tl))
             self.wait(1.5)
@@ -273,7 +283,7 @@ class Sheets(ChapterScene):
             # why: at a pixel of the faint vessel near the crossing, the strong vessel's lobe wins
             q = GR.RO_CENTRE + 5.0 * st["uf"]
             vals = C[:, int(round(q[1])), int(round(q[0]))]
-            ring = Circle(radius=0.09, stroke_color=WHITE, stroke_width=3).move_to(pfL.point(*q))
+            ring = Circle(radius=0.12, stroke_color=WHITE, stroke_width=3).move_to(pfL.point(*q))
             ch = bar_chart(vals, width=4.6, height=2.3, vmax=float(vals.max()) * 1.1,
                            colors=[orientation_color(t) for t in N.THETAS]).move_to(R + DOWN * 0.3)
             kbest = int(np.argmax(vals))
@@ -294,7 +304,7 @@ class Sheets(ChapterScene):
             self.play(FadeOut(VGroup(ch, bt, b1, b2)), FadeOut(ring), run_time=0.6)
 
         # per orientation: the faint vessel's own sheet keeps its crest
-        sh = rgba(tinted(C[k_f], N.THETAS[k_f], alpha_floor=0.0))
+        sh = rgba(tinted(C[k_f][crop], N.THETAS[k_f], alpha_floor=0.0))
         sh.height = H
         sh.move_to(R)
         bgR = Square(side_length=H, stroke_width=0, fill_color=BLACK, fill_opacity=1).move_to(R)
@@ -302,7 +312,7 @@ class Sheets(ChapterScene):
         stt = Tex(rf"per orientation: the faint vessel's sheet\\($\theta = {np.degrees(N.THETAS[k_f]):.2f}^\circ$, and one either side)").scale(0.5)
         stt.next_to(sh, UP, buff=0.15)
         own = ms["Rs"][[(k_f - 1) % 16, k_f, (k_f + 1) % 16]].any(axis=0)
-        rs = rgba(ridge_overlay(thick(own), colors=np.broadcast_to(hues[k_f], own.shape + (3,))))
+        rs = rgba(ridge_overlay(thick(own)[crop], colors=np.broadcast_to(hues[k_f], own[crop].shape + (3,))))
         rs.height = H
         rs.move_to(R)
         self.say(r"Read per orientation (layer 06): ridge tops in each sheet, across that sheet's own normal.")
@@ -310,7 +320,7 @@ class Sheets(ChapterScene):
         self.play(FadeIn(rs), run_time=0.8)
         ok = Tex(rf"its crest runs through: missing {ms['sheets']:.0f} px (toy)", color=GREEN_C).scale(0.48)
         ok.next_to(sh, DOWN, buff=0.12)
-        hl = Circle(radius=0.55, stroke_color=GREEN_C, stroke_width=3).move_to(pfR.point(*GR.RO_CENTRE))
+        hl = Circle(radius=0.9, stroke_color=GREEN_C, stroke_width=3).move_to(pfR.point(*GR.RO_CENTRE))
         self.say(r"In its own sheet the faint vessel keeps a crest through the crossing, and its track is not cut.",
                  wait=0.5)
         self.play(Create(hl), FadeIn(ok))
