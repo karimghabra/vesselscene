@@ -582,6 +582,11 @@ class AttentiveGrouping(ChapterScene):
 
     # -------------------------------------------- 8. level 3: identity breaks
     def breaks(self):
+        if VD.available():
+            self._breaks_crop()
+        self._breaks_cause()
+
+    def _breaks_crop(self):
         x0, y0, w, h = 0, 60, 300, 180
         g = AT.real_crop(x0, y0, w, h)
         S = VD.load()
@@ -625,11 +630,13 @@ class AttentiveGrouping(ChapterScene):
         self.play(FadeIn(cnt))
         self.wait(1.5)
 
+        self.play(FadeOut(mobs), FadeOut(comp), FadeOut(tru), FadeOut(cnt), run_time=0.8)
+
+    def _breaks_cause(self):
         # the cause: the claim sticks out past a vessel's end
         self.say(r"The cause (spec 4.10): the claimed square sticks out past a vessel's end, so a later label coming toward"
                  r" that end stops just short of it.")
         cause = self._cause_diagram()
-        self.play(FadeOut(mobs), FadeOut(comp), FadeOut(tru), FadeOut(cnt), run_time=0.8)
         self.play(FadeIn(cause[0]), run_time=0.8)
         self.play(Create(cause[1]), run_time=1.5, rate_func=linear)
         self.play(FadeIn(cause[2][0]), LaggedStart(*[Create(sq) for sq in cause[2][1]], lag_ratio=0.2), run_time=1.2)
