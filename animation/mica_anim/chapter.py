@@ -67,10 +67,11 @@ class ChapterScene(Scene):
         """Replace the caption.  wait='read' holds it for its reading time
         (minus the 0.7 s the swap takes); a number waits that long."""
         new = caption_mobject(text)
-        anims = [FadeIn(new, shift=UP * 0.15)]
-        if self._cap is not None:
-            anims.insert(0, FadeOut(self._cap, shift=UP * 0.15))
-        self.play(*anims, run_time=0.7)
+        if self._cap is not None:                     # one after the other: two captions never overlap
+            self.play(FadeOut(self._cap, shift=UP * 0.1), run_time=0.3)
+            self.play(FadeIn(new, shift=UP * 0.1), run_time=0.4)
+        else:
+            self.play(FadeIn(new, shift=UP * 0.1), run_time=0.7)
         self._cap = new
         if wait == "read":
             wait = max(reading_time(text) - 0.7, 0.5)
